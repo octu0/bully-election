@@ -27,10 +27,10 @@ import (
 func main() {
     ctx := context.Background()
     conf := memberlist.DefaultLocalConfig()
-	conf.Name = "node1"
-	conf.BindPort = 7947
+    conf.Name = "node1"
+    conf.BindPort = 7947
     conf.AdvertiseAddr = "10.0.0.123"
-	conf.AdvertisePort = conf.BindPort
+    conf.AdvertisePort = conf.BindPort
 
     b, err := bullyelection.CreateVoter(ctx, conf, observe)
     err := b.Join("10.0.0.1")
