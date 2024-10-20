@@ -39,11 +39,16 @@ const (
 	UpdateEvent
 )
 
-type ObserveFunc func(*Bully, NodeEvent)
+type (
+	ObserveFunc             func(*Bully, NodeEvent)
+	NodeNumberGeneratorFunc func(string) int64
+)
 
-type NodeNumberGeneratorFunc func(string) int64
+func DefaultObserverFunc(b *Bully, evt NodeEvent) {
+	// nop
+}
 
-func DefaultNodeNumberGenerator(string) int64 {
+func DefaultNodeNumberGeneratorFunc(string) int64 {
 	return time.Now().UnixNano()
 }
 
@@ -86,17 +91,11 @@ func newBullyOpt(opts []BullyOptFunc) *bullyOpt {
 		electionTimeout:   DefaultElectionTimeout,
 		electionInterval:  DefaultElectionInterval,
 		updateNodeTimeout: DefaultUpdateNodeTimeout,
+		observeFunc:       DefaultObserverFunc,
+		nodeNumberGenFunc: DefaultNodeNumberGeneratorFunc,
 	}
 	for _, f := range opts {
 		f(opt)
-	}
-	if opt.observeFunc == nil {
-		opt.observeFunc = func(b *Bully, evt NodeEvent) {
-			// nop
-		}
-	}
-	if opt.nodeNumberGenFunc == nil {
-		opt.nodeNumberGenFunc = DefaultNodeNumberGenerator
 	}
 	return opt
 }
