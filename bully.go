@@ -13,22 +13,23 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	DefaultElectionTimeout   = 30 * time.Second
+	DefaultElectionInterval  = 100 * time.Millisecond
+	DefaultUpdateNodeTimeout = 3 * time.Second
+)
+
 var (
 	errNodeNotFound = errors.New("node not found")
 )
 
-type State string
-
-const (
-	StateInitial  State = "init"
-	StateElecting State = "electing"
-	StateAnswered State = "answered"
-	StateElected  State = "elected"
+var (
+	bufferPool = &sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 0, 1024))
+		},
+	}
 )
-
-func (s State) String() string {
-	return string(s)
-}
 
 type NodeEvent uint8
 
@@ -40,12 +41,72 @@ const (
 
 type ObserveFunc func(*Bully, NodeEvent)
 
+type NodeNumberGeneratorFunc func(string) int64
+
+func DefaultNodeNumberGenerator(string) int64 {
+	return time.Now().UnixNano()
+}
+
+type BullyOptFunc func(*bullyOpt)
+
+type bullyOpt struct {
+	observeFunc       ObserveFunc
+	electionTimeout   time.Duration
+	electionInterval  time.Duration
+	updateNodeTimeout time.Duration
+	nodeNumberGenFunc NodeNumberGeneratorFunc
+}
+
+func WithObserveFunc(f ObserveFunc) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.observeFunc = f
+	}
+}
+
+func WithElectionTimeout(d time.Duration) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.electionTimeout = d
+	}
+}
+
+func WithElectionInterval(d time.Duration) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.electionInterval = d
+	}
+}
+
+func WithUpdateNodeTimeout(d time.Duration) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.updateNodeTimeout = d
+	}
+}
+
+func newBullyOpt(opts []BullyOptFunc) *bullyOpt {
+	opt := &bullyOpt{
+		electionTimeout:   DefaultElectionTimeout,
+		electionInterval:  DefaultElectionInterval,
+		updateNodeTimeout: DefaultUpdateNodeTimeout,
+	}
+	for _, f := range opts {
+		f(opt)
+	}
+	if opt.observeFunc == nil {
+		opt.observeFunc = func(b *Bully, evt NodeEvent) {
+			// nop
+		}
+	}
+	if opt.nodeNumberGenFunc == nil {
+		opt.nodeNumberGenFunc = DefaultNodeNumberGenerator
+	}
+	return opt
+}
+
 type Bully struct {
-	wg          *sync.WaitGroup
-	cancel      context.CancelFunc
-	node        Node
-	list        *memberlist.Memberlist
-	observeFunc ObserveFunc
+	opt    *bullyOpt
+	wg     *sync.WaitGroup
+	cancel context.CancelFunc
+	node   Node
+	list   *memberlist.Memberlist
 }
 
 func (b *Bully) IsVoter() bool {
@@ -62,6 +123,14 @@ func (b *Bully) Address() string {
 
 func (b *Bully) IsLeader() bool {
 	return b.node.IsLeader()
+}
+
+func (b *Bully) UpdateMetadata(data []byte) error {
+	b.node.setUserMetadata(data)
+	if err := b.list.UpdateNode(10 * time.Second); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
 }
 
 func (b *Bully) Members() []Node {
@@ -93,6 +162,18 @@ func (b *Bully) Leave(timeout time.Duration) error {
 	return nil
 }
 
+func (b *Bully) TransferLeader(ctx context.Context) error {
+	if b.node.IsLeader() != true {
+		return nil
+	}
+
+	if err := startTransferLeader(ctx, b); err != nil {
+		return errors.WithStack(err)
+	}
+
+	return nil
+}
+
 func (b *Bully) Shutdown() error {
 	if err := b.list.Shutdown(); err != nil {
 		return errors.WithStack(err)
@@ -102,35 +183,83 @@ func (b *Bully) Shutdown() error {
 	return nil
 }
 
-func (b *Bully) setState(newState State) {
-	b.node.setState(newState.String())
+func (b *Bully) setState(newState State) bool {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		vn.setState(newState.String())
+		return true
+	}
+	return false
 }
 
-func (b *Bully) resetVote() {
-	b.node.resetVote()
+func (b *Bully) setLeaderID(id string) bool {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		vn.setLeaderID(id)
+		return true
+	}
+	return false
 }
 
-func (b *Bully) updateNode(timeout time.Duration) error {
-	if err := b.list.UpdateNode(timeout); err != nil {
+func (b *Bully) resetVote() bool {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		vn.resetVote()
+		return true
+	}
+	return false
+}
+
+func (b *Bully) incrementElection(n uint32) bool {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		vn.incrementElection(n)
+		return true
+	}
+	return false
+}
+
+func (b *Bully) incrementAnswer(n uint32) bool {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		vn.incrementAnswer(n)
+		return true
+	}
+	return false
+}
+
+func (b *Bully) updateNode() error {
+	if err := b.list.UpdateNode(b.opt.updateNodeTimeout); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func (b *Bully) send(targetNodeID string, data []byte) error {
-	targetNode, err := func() (*memberlist.Node, error) {
-		for _, m := range b.list.Members() {
-			if m.Name == targetNodeID {
-				return m, nil
-			}
-		}
+func (b *Bully) setNodeNumber(newNumber int64) bool {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		vn.setNodeNumber(newNumber)
+		return true
+	}
+	return false
+}
 
-		return nil, errors.Wrapf(errNodeNotFound, "target node-id=%s", targetNodeID)
-	}()
+func (b *Bully) getNodeNumber() int64 {
+	if vn, ok := b.node.(internalVoterNode); ok {
+		return vn.getNodeNumber()
+	}
+	return -1
+}
+
+func (b *Bully) findNode(targetNodeID string) (*memberlist.Node, error) {
+	for _, m := range b.list.Members() {
+		if m.Name == targetNodeID {
+			return m, nil
+		}
+	}
+
+	return nil, errors.Wrapf(errNodeNotFound, "target node-id=%s", targetNodeID)
+}
+
+func (b *Bully) send(targetNodeID string, data []byte) error {
+	targetNode, err := b.findNode(targetNodeID)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-
 	if err := b.list.SendReliable(targetNode, data); err != nil {
 		return errors.WithStack(err)
 	}
@@ -138,7 +267,10 @@ func (b *Bully) send(targetNodeID string, data []byte) error {
 }
 
 func (b *Bully) sendElection(targetNodeID string) error {
-	buf := bytes.NewBuffer(nil)
+	buf := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buf)
+	buf.Reset()
+
 	if err := marshalMessage(buf, ElectionMessage, b.ID()); err != nil {
 		return errors.WithStack(err)
 	}
@@ -146,7 +278,10 @@ func (b *Bully) sendElection(targetNodeID string) error {
 }
 
 func (b *Bully) sendAnswer(targetNodeID string) error {
-	buf := bytes.NewBuffer(nil)
+	buf := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buf)
+	buf.Reset()
+
 	if err := marshalMessage(buf, AnswerMessage, b.ID()); err != nil {
 		return errors.WithStack(err)
 	}
@@ -154,8 +289,22 @@ func (b *Bully) sendAnswer(targetNodeID string) error {
 }
 
 func (b *Bully) sendCoordinator(targetNodeID string) error {
-	buf := bytes.NewBuffer(nil)
+	buf := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buf)
+	buf.Reset()
+
 	if err := marshalMessage(buf, CoordinatorMessage, b.ID()); err != nil {
+		return errors.WithStack(err)
+	}
+	return b.send(targetNodeID, buf.Bytes())
+}
+
+func (b *Bully) sendTransferLeader(targetNodeID string) error {
+	buf := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buf)
+	buf.Reset()
+
+	if err := marshalMessage(buf, TransferLeaderMessage, b.ID()); err != nil {
 		return errors.WithStack(err)
 	}
 	return b.send(targetNodeID, buf.Bytes())
@@ -174,34 +323,9 @@ func (b *Bully) readMessageLoop(ctx context.Context, ch chan []byte) {
 				log.Printf("error: recv data(%s): %+v", data, err)
 				continue
 			}
-
-			switch msg.Type {
-			case ElectionMessage:
-				if err := b.sendAnswer(msg.NodeID); err != nil {
-					log.Printf("error: send answer(%s): %+v", msg.NodeID, err)
-					continue
-				}
-				b.node.incrementElection(1)
-				b.setState(StateAnswered)
-				if err := b.updateNode(10 * time.Second); err != nil {
-					log.Printf("error: updateNode: %+v", err)
-					continue
-				}
-
-			case AnswerMessage:
-				b.node.incrementAnswer(1)
-				if err := b.updateNode(10 * time.Second); err != nil {
-					log.Printf("error: updateNode: %+v", err)
-					continue
-				}
-
-			case CoordinatorMessage:
-				b.node.setLeaderID(msg.NodeID)
-				b.setState(StateElected)
-				if err := b.updateNode(10 * time.Second); err != nil {
-					log.Printf("error: updateNode: %+v", err)
-					continue
-				}
+			if err := handleMessage(ctx, b, msg); err != nil {
+				log.Printf("error: handle message: %+v", err)
+				continue
 			}
 		}
 	}
@@ -220,22 +344,25 @@ func (b *Bully) readNodeEventLoop(ctx context.Context, ch chan *hookNodeEventMsg
 				if err := startElection(ctx, b); err != nil {
 					log.Printf("error: election failure: %+v", err)
 				}
+				b.opt.observeFunc(b, msg.evt)
+			case UpdateEvent:
+				// nop
 			}
-			b.observeFunc(b, msg.evt)
 		}
 	}
 }
 
-func CreateVoter(parent context.Context, conf *memberlist.Config, observeFunc ObserveFunc) (*Bully, error) {
+func CreateVoter(parent context.Context, conf *memberlist.Config, funcs ...BullyOptFunc) (*Bully, error) {
+	opt := newBullyOpt(funcs)
+
 	ctx, cancel := context.WithCancel(parent)
 	msgCh := make(chan []byte, 0)
 	evtCh := make(chan *hookNodeEventMsg, 0)
 
-	node := NewVoterNode(conf.Name, conf.AdvertiseAddr, conf.AdvertisePort, StateInitial.String())
-	orgDelegate := conf.Delegate
-	orgEvents := conf.Events
-	conf.Delegate = newHookMessage(msgCh, node, orgDelegate)
-	conf.Events = newHooNodeEvent(evtCh, orgEvents)
+	nodeNum := opt.nodeNumberGenFunc(conf.Name)
+	node := NewVoterNode(conf.Name, conf.AdvertiseAddr, conf.AdvertisePort, StateInitial.String(), nodeNum)
+	conf.Delegate = newHookMessage(msgCh, node)
+	conf.Events = newHooNodeEvent(evtCh)
 
 	list, err := memberlist.Create(conf)
 	if err != nil {
@@ -244,11 +371,11 @@ func CreateVoter(parent context.Context, conf *memberlist.Config, observeFunc Ob
 	}
 
 	b := &Bully{
-		wg:          new(sync.WaitGroup),
-		cancel:      cancel,
-		node:        node,
-		list:        list,
-		observeFunc: observeFunc,
+		opt:    opt,
+		wg:     new(sync.WaitGroup),
+		cancel: cancel,
+		node:   node,
+		list:   list,
 	}
 	b.wg.Add(2)
 	go b.readMessageLoop(ctx, msgCh)
@@ -257,13 +384,14 @@ func CreateVoter(parent context.Context, conf *memberlist.Config, observeFunc Ob
 	return b, nil
 }
 
-func CreateNonVoter(parent context.Context, conf *memberlist.Config, observeFunc ObserveFunc) (*Bully, error) {
+func CreateNonVoter(parent context.Context, conf *memberlist.Config, funcs ...BullyOptFunc) (*Bully, error) {
+	opt := newBullyOpt(funcs)
+
 	ctx, cancel := context.WithCancel(parent)
 	msgCh := make(chan []byte, 0)
 
 	node := NewNonvoterNode(conf.Name, conf.AdvertiseAddr, conf.AdvertisePort)
-	orgDelegate := conf.Delegate
-	conf.Delegate = newHookMessage(msgCh, node, orgDelegate)
+	conf.Delegate = newHookMessage(msgCh, node)
 
 	list, err := memberlist.Create(conf)
 	if err != nil {
@@ -272,11 +400,11 @@ func CreateNonVoter(parent context.Context, conf *memberlist.Config, observeFunc
 	}
 
 	b := &Bully{
-		wg:          new(sync.WaitGroup),
-		cancel:      cancel,
-		node:        node,
-		list:        list,
-		observeFunc: observeFunc,
+		opt:    opt,
+		wg:     new(sync.WaitGroup),
+		cancel: cancel,
+		node:   node,
+		list:   list,
 	}
 	b.wg.Add(1)
 	go b.readMessageLoop(ctx, msgCh)
@@ -293,43 +421,20 @@ type hookMessage struct {
 
 	msgCh chan []byte
 	node  Node
-	orig  memberlist.Delegate
 }
 
 func (d *hookMessage) GetBroadcasts(overhead int, limit int) [][]byte {
-	d.Lock()
-	defer d.Unlock()
-
-	if d.orig != nil {
-		return d.orig.GetBroadcasts(overhead, limit)
-	}
+	// nop
 	return nil
 }
 
 func (d *hookMessage) LocalState(join bool) []byte {
-	d.Lock()
-	defer d.Unlock()
-
-	buf := bytes.NewBuffer(nil)
-	buf.WriteString(d.node.State())
-	if join {
-		buf.WriteString("-joined")
-	}
-	if d.orig != nil {
-		st := d.orig.LocalState(join)
-		buf.WriteString("-")
-		buf.Write(st)
-	}
-	return buf.Bytes()
+	// nop
+	return nil
 }
 
 func (d *hookMessage) MergeRemoteState(buf []byte, join bool) {
-	d.Lock()
-	defer d.Unlock()
-
-	if d.orig != nil {
-		d.orig.MergeRemoteState(buf, join)
-	}
+	// nop
 }
 
 func (d *hookMessage) NodeMeta(limit int) []byte {
@@ -337,14 +442,7 @@ func (d *hookMessage) NodeMeta(limit int) []byte {
 	defer d.Unlock()
 
 	buf := bytes.NewBuffer(nil)
-	arib := func() []byte {
-		if d.orig != nil {
-			return d.orig.NodeMeta(limit)
-		}
-		return nil
-	}()
-
-	if err := d.node.ToJSON(buf, arib); err != nil {
+	if err := d.node.toJSON(buf); err != nil {
 		log.Printf("warn: node.ToJSON %+v", errors.WithStack(err))
 		return nil
 	}
@@ -363,11 +461,10 @@ func (d *hookMessage) NotifyMsg(msg []byte) {
 	}
 }
 
-func newHookMessage(ch chan []byte, node Node, orgDelegate memberlist.Delegate) *hookMessage {
+func newHookMessage(ch chan []byte, node Node) *hookMessage {
 	return &hookMessage{
 		msgCh: ch,
 		node:  node,
-		orig:  orgDelegate,
 	}
 }
 
@@ -384,7 +481,6 @@ type hookNodeEvent struct {
 	sync.Mutex
 
 	evtCh chan *hookNodeEventMsg
-	orig  memberlist.EventDelegate
 }
 
 func (e *hookNodeEvent) NotifyJoin(node *memberlist.Node) {
@@ -397,10 +493,6 @@ func (e *hookNodeEvent) NotifyJoin(node *memberlist.Node) {
 		// ok
 	default:
 		log.Printf("warn: evtCh maybe hangup(join), drop msg: %+v", msg)
-	}
-
-	if e.orig != nil {
-		e.orig.NotifyJoin(node)
 	}
 }
 
@@ -415,10 +507,6 @@ func (e *hookNodeEvent) NotifyLeave(node *memberlist.Node) {
 	default:
 		log.Printf("warn: evtCh maybe hangup(leave), drop msg: %+v", msg)
 	}
-
-	if e.orig != nil {
-		e.orig.NotifyLeave(node)
-	}
 }
 
 func (e *hookNodeEvent) NotifyUpdate(node *memberlist.Node) {
@@ -432,15 +520,8 @@ func (e *hookNodeEvent) NotifyUpdate(node *memberlist.Node) {
 	default:
 		log.Printf("warn: evtCh maybe hangup(update), drop msg: %+v", msg)
 	}
-
-	if e.orig != nil {
-		e.orig.NotifyUpdate(node)
-	}
 }
 
-func newHooNodeEvent(ch chan *hookNodeEventMsg, orig memberlist.EventDelegate) *hookNodeEvent {
-	return &hookNodeEvent{
-		evtCh: ch,
-		orig:  orig,
-	}
+func newHooNodeEvent(ch chan *hookNodeEventMsg) *hookNodeEvent {
+	return &hookNodeEvent{evtCh: ch}
 }
