@@ -17,12 +17,15 @@ const (
 	DefaultElectionTimeout   = 30 * time.Second
 	DefaultElectionInterval  = 100 * time.Millisecond
 	DefaultUpdateNodeTimeout = 3 * time.Second
+	DefaultJoinNodeTimeout   = 3 * time.Second
 	DefaultLeaveNodeTimeout  = 3 * time.Second
 )
 
 var (
 	ErrBullyInitialize   = errors.New("bully initialize")
 	ErrBullyAliveTimeout = errors.New("bully alive timeout")
+	ErrJoinTimeout       = errors.New("join timeout")
+	ErrLeaveTimeout      = errors.New("leave timeout")
 	errNodeNotFound      = errors.New("node not found")
 )
 
@@ -79,6 +82,7 @@ type bullyOpt struct {
 	electionTimeout   time.Duration
 	electionInterval  time.Duration
 	updateNodeTimeout time.Duration
+	joinNodeTimeout   time.Duration
 	leaveNodeTimeout  time.Duration
 	nodeNumberGenFunc NodeNumberGeneratorFunc
 	onErrorFunc       OnErrorFunc
@@ -108,6 +112,12 @@ func WithUpdateNodeTimeout(d time.Duration) BullyOptFunc {
 	}
 }
 
+func WithJoinNodeTimeout(d time.Duration) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.joinNodeTimeout = d
+	}
+}
+
 func WithLeaveNodeTimeout(d time.Duration) BullyOptFunc {
 	return func(o *bullyOpt) {
 		o.leaveNodeTimeout = d
@@ -131,6 +141,7 @@ func newBullyOpt(opts []BullyOptFunc) *bullyOpt {
 		electionTimeout:   DefaultElectionTimeout,
 		electionInterval:  DefaultElectionInterval,
 		updateNodeTimeout: DefaultUpdateNodeTimeout,
+		joinNodeTimeout:   DefaultJoinNodeTimeout,
 		leaveNodeTimeout:  DefaultLeaveNodeTimeout,
 		observeFunc:       DefaultObserverFunc,
 		nodeNumberGenFunc: DefaultNodeNumberGeneratorFunc,
@@ -143,15 +154,16 @@ func newBullyOpt(opts []BullyOptFunc) *bullyOpt {
 }
 
 type Bully struct {
-	opt       *bullyOpt
-	wg        *sync.WaitGroup
-	onceJoin  *sync.Once
-	onceLeave *sync.Once
-	waitJoin  chan struct{}
-	waitLeave chan struct{}
-	cancel    context.CancelFunc
-	node      Node
-	list      *memberlist.Memberlist
+	opt         *bullyOpt
+	mu          *sync.RWMutex
+	wg          *sync.WaitGroup
+	onceStartup *sync.Once
+	waitStartup chan struct{}
+	joinWait    map[string]chan struct{}
+	leaveWait   map[string]chan struct{}
+	cancel      context.CancelFunc
+	node        Node
+	list        *memberlist.Memberlist
 }
 
 func (b *Bully) IsVoter() bool {
@@ -194,17 +206,63 @@ func (b *Bully) Members() []Node {
 }
 
 func (b *Bully) Join(addr string) error {
+	if addr == b.list.LocalNode().Address() {
+		return nil // skip self join (memberlist no event)
+	}
+
+	wait := make(chan struct{})
+	b.mu.Lock()
+	b.joinWait[addr] = wait
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.joinWait, addr)
+		b.mu.Unlock()
+	}()
+
+	ret := make(chan error)
+	go func() {
+		select {
+		case <-time.After(b.opt.joinNodeTimeout * 2):
+			ret <- errors.Wrapf(ErrJoinTimeout, "memberlist joined but not call callback")
+		case <-wait:
+			ret <- nil // ok
+		}
+	}()
+
 	if _, err := b.list.Join([]string{addr}); err != nil {
 		return errors.WithStack(err)
 	}
-	return nil
+
+	return <-ret
 }
 
 func (b *Bully) Leave() error {
+	addr := b.list.LocalNode().Address()
+	wait := make(chan struct{})
+	b.mu.Lock()
+	b.leaveWait[addr] = wait
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.leaveWait, addr)
+		b.mu.Unlock()
+	}()
+
+	ret := make(chan error)
+	go func() {
+		select {
+		case <-time.After(b.opt.leaveNodeTimeout * 2):
+			ret <- errors.Wrapf(ErrLeaveTimeout, "memberlist leaved but not call callback")
+		case <-wait:
+			ret <- nil // ok
+		}
+	}()
+
 	if err := b.list.Leave(b.opt.leaveNodeTimeout); err != nil {
 		return errors.WithStack(err)
 	}
-	return nil
+	return <-ret
 }
 
 func (b *Bully) TransferLeader(ctx context.Context) error {
@@ -391,21 +449,48 @@ func (b *Bully) readNodeEventLoop(ctx context.Context, ch chan *hookNodeEventMsg
 					continue
 				}
 				if msg.node.Name == b.node.ID() {
-					b.onceJoin.Do(func() {
+					b.onceStartup.Do(func() {
 						select {
-						case b.waitJoin <- struct{}{}:
+						case b.waitStartup <- struct{}{}:
 							// ok
 						default:
 							// pass
 						}
 					})
 				}
-				b.opt.observeFunc(b, msg.evt)
-			case LeaveEvent:
-				if err := startElection(ctx, b); err != nil {
-					b.opt.onErrorFunc(errors.Wrapf(err, "election failure"))
-					continue
+
+				b.mu.RLock()
+				if ch, ok := b.joinWait[msg.node.Address()]; ok {
+					select {
+					case ch <- struct{}{}:
+						// ok
+					default:
+						log.Printf("warn: join wait exits but has no reader")
+					}
 				}
+				b.mu.RUnlock()
+
+				b.opt.observeFunc(b, msg.evt)
+
+			case LeaveEvent:
+				if msg.node.Name != b.node.ID() { // leave other node = run election
+					if err := startElection(ctx, b); err != nil {
+						b.opt.onErrorFunc(errors.Wrapf(err, "election failure"))
+						continue
+					}
+				}
+
+				b.mu.RLock()
+				if ch, ok := b.leaveWait[msg.node.Address()]; ok {
+					select {
+					case ch <- struct{}{}:
+						// ok
+					default:
+						log.Printf("warn: leave wait exists but has no reader")
+					}
+				}
+				b.mu.RUnlock()
+
 				b.opt.observeFunc(b, msg.evt)
 			}
 		}
@@ -418,20 +503,23 @@ func (b *Bully) waitSelfJoin(ctx context.Context) error {
 		return errors.WithStack(ErrBullyInitialize)
 	case <-time.After(b.opt.electionTimeout):
 		return errors.WithStack(ErrBullyAliveTimeout)
-	case <-b.waitJoin:
+	case <-b.waitStartup:
 		return nil // ok
 	}
 }
 
 func newBully(cancel context.CancelFunc, node Node, list *memberlist.Memberlist, opt *bullyOpt) *Bully {
 	return &Bully{
-		opt:      opt,
-		wg:       new(sync.WaitGroup),
-		onceJoin: new(sync.Once),
-		waitJoin: make(chan struct{}),
-		cancel:   cancel,
-		node:     node,
-		list:     list,
+		opt:         opt,
+		mu:          new(sync.RWMutex),
+		wg:          new(sync.WaitGroup),
+		onceStartup: new(sync.Once),
+		waitStartup: make(chan struct{}),
+		joinWait:    make(map[string]chan struct{}),
+		leaveWait:   make(map[string]chan struct{}),
+		cancel:      cancel,
+		node:        node,
+		list:        list,
 	}
 }
 

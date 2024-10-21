@@ -145,7 +145,7 @@ func leaderElection(ctx context.Context, b *Bully, voterNodes []internalVoterNod
 	selfNodeNumber := b.getNodeNumber()
 	targetNodes := make([]internalVoterNode, 0, len(voterNodes))
 	for _, n := range voterNodes {
-		if n.getNodeNumber() < selfNodeNumber {
+		if selfNodeNumber < n.getNodeNumber() {
 			targetNodes = append(targetNodes, n)
 		}
 	}
@@ -184,7 +184,7 @@ func syncLeader(ctx context.Context, b *Bully, answerNodes []internalVoterNode) 
 	if len(leaderNodes) == 0 {
 		msg := bytes.NewBuffer(nil)
 		for _, n := range answerNodes {
-			msg.WriteString(fmt.Sprintf("id:%s election:%d answer:%d\n", n.ID(), n.getNumElection(), n.getNumAnswer()))
+			fmt.Fprintf(msg, "id:%s election:%d answer:%d\n", n.ID(), n.getNumElection(), n.getNumAnswer())
 		}
 		return nil, errors.Wrapf(ErrNoLeader, msg.String())
 	}
