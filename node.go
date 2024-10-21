@@ -11,6 +11,9 @@ type Node interface {
 	ID() string
 	Addr() string
 	Port() int
+	setPort(int)
+
+	// node type
 	IsVoterNode() bool
 
 	// leader
@@ -28,7 +31,7 @@ type internalVoterNode interface {
 	Node
 
 	// state
-	State() string
+	getState() string
 	setState(string)
 
 	// vote
@@ -123,11 +126,15 @@ func (vn *voterNode) Port() int {
 	return vn.port
 }
 
+func (vn *voterNode) setPort(p int) {
+	vn.port = p
+}
+
 func (vn *voterNode) IsVoterNode() bool {
 	return true
 }
 
-func (vn *voterNode) State() string {
+func (vn *voterNode) getState() string {
 	return vn.state
 }
 
@@ -226,6 +233,10 @@ func (nn *nonvoterNode) Addr() string {
 
 func (nn *nonvoterNode) Port() int {
 	return nn.port
+}
+
+func (nn *nonvoterNode) setPort(p int) {
+	nn.port = p
 }
 
 func (nn *nonvoterNode) IsVoterNode() bool {

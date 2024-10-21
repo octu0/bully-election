@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"github.com/pkg/errors"
@@ -90,47 +91,6 @@ func startElection(parent context.Context, b *Bully) error {
 			return errors.WithStack(err)
 		}
 		return nil
-	}
-
-	if err := leaderElection(ctx, b, voterNodes); err != nil {
-		return errors.WithStack(err)
-	}
-
-	return nil
-}
-
-func startTransferLeader(parent context.Context, b *Bully) error {
-	if b.IsVoter() != true {
-		return nil
-	}
-	if b.IsLeader() != true {
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(parent, b.opt.electionTimeout)
-	defer cancel()
-
-	// all nodes must state = running
-	nodes, err := waitVoterNodes(ctx, b, StateRunning)
-	if err != nil {
-		return errors.Wrapf(ErrNodeNotReadyCondition, "cause: %+v", err)
-	}
-
-	b.setNodeNumber(b.opt.nodeNumberGenFunc(b.ID()))
-	if err := b.updateNode(); err != nil {
-		return errors.Wrapf(ErrBeginTransferLeader, "cause: %+v", err)
-	}
-
-	for _, n := range nodes {
-		if err := b.sendTransferLeader(n.ID()); err != nil {
-			return errors.Wrapf(ErrBeginTransferLeader, "cause: %+v", err)
-		}
-	}
-
-	// wait state change
-	voterNodes, err := waitVoterNodes(ctx, b, StateTransferLeader)
-	if err != nil {
-		return errors.WithStack(err)
 	}
 
 	if err := leaderElection(ctx, b, voterNodes); err != nil {
@@ -239,13 +199,19 @@ func handleMessage(_ context.Context, b *Bully, msg Message) error {
 		if err := b.updateNode(); err != nil {
 			return errors.Wrapf(err, "updateNode timeout")
 		}
+		select {
+		case b.electionQueue <- struct{}{}:
+			// ok
+		default:
+			log.Printf("warn: election queue already registered")
+		}
 	}
 	return nil
 }
 
 func waitNodeStateAnswered(ctx context.Context, b *Bully, expectNum int) ([]internalVoterNode, error) {
 	for {
-		voters := getVoterNodes(b)
+		voters := filterVoterNodes(b.Members())
 
 		num := numState(voters, StateAnswered)
 		if expectNum == num {
@@ -263,14 +229,20 @@ func waitNodeStateAnswered(ctx context.Context, b *Bully, expectNum int) ([]inte
 
 func waitVoterNodes(ctx context.Context, b *Bully, targetState State) ([]internalVoterNode, error) {
 	for {
-		voters := getVoterNodes(b)
+		voters := filterVoterNodes(b.Members())
 		if isAllState(voters, targetState) {
 			return voters, nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return nil, errors.WithStack(ErrElectionTimeout)
+			msg := bytes.NewBuffer(nil)
+			msg.WriteString("[")
+			for _, n := range voters {
+				fmt.Fprintf(msg, "id:%s election:%d answer:%d,", n.ID(), n.getNumElection(), n.getNumAnswer())
+			}
+			msg.WriteString("]")
+			return nil, errors.Wrapf(ErrElectionTimeout, msg.String())
 		case <-time.After(b.opt.electionInterval):
 			// continue
 		}
@@ -279,7 +251,7 @@ func waitVoterNodes(ctx context.Context, b *Bully, targetState State) ([]interna
 
 func isAllState(nodes []internalVoterNode, targetState State) bool {
 	for _, node := range nodes {
-		if node.State() != targetState.String() {
+		if node.getState() != targetState.String() {
 			return false
 		}
 	}
@@ -289,15 +261,14 @@ func isAllState(nodes []internalVoterNode, targetState State) bool {
 func numState(nodes []internalVoterNode, targetState State) int {
 	total := 0
 	for _, node := range nodes {
-		if node.State() == targetState.String() {
+		if node.getState() == targetState.String() {
 			total += 1
 		}
 	}
 	return total
 }
 
-func getVoterNodes(b *Bully) []internalVoterNode {
-	members := b.Members()
+func filterVoterNodes(members []Node) []internalVoterNode {
 	voters := make([]internalVoterNode, 0, len(members))
 	for _, m := range members {
 		if m.IsVoterNode() {
