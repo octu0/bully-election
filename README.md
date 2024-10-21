@@ -32,19 +32,18 @@ func main() {
     conf.AdvertiseAddr = "10.0.0.123"
     conf.AdvertisePort = conf.BindPort
 
-    b, err := bullyelection.CreateVoter(ctx, conf, observe)
+    b, err := CreateVoter(ctx, conf,
+		WithElectionTimeout(1*time.Second),
+		WithObserveFunc(func(b *Bully, evt NodeEvent) {
+			log.Printf("evt=%s", evt)
+		}),
+		WithOnErrorFunc(func(err error) {
+			log.Printf("error=%+v", err)
+		}),
+	)
     err := b.Join("10.0.0.1")
     b.IsLeader()
-    b.Leave(10 * time.Minute)
-}
-
-func observe(b *bullyelection.Bully, evt bullyelection.NodeEvent) {
-    switch {
-    case bullyelection.JoinEvent:
-        // ...
-    case bullyelection.LeaveEvent:
-        // ...
-    }
+    b.Leave()
 }
 ```
 
