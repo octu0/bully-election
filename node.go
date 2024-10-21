@@ -45,11 +45,11 @@ type internalVoterNode interface {
 }
 
 var (
-	_ Node              = (*VoterNode)(nil)
-	_ internalVoterNode = (*VoterNode)(nil)
+	_ Node              = (*voterNode)(nil)
+	_ internalVoterNode = (*voterNode)(nil)
 )
 
-type NodeMeta struct {
+type nodeMeta struct {
 	ID           string `json:"id"`
 	Addr         string `json:"addr"`
 	Port         int    `json:"port"`
@@ -62,24 +62,24 @@ type NodeMeta struct {
 	NodeNumber   int64  `json:"node-number"`
 }
 
-func toJSON(out io.Writer, meta NodeMeta) error {
+func toJSON(out io.Writer, meta nodeMeta) error {
 	if err := json.NewEncoder(out).Encode(meta); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func fromJSON(in io.Reader) (NodeMeta, error) {
-	meta := NodeMeta{}
+func fromJSON(in io.Reader) (nodeMeta, error) {
+	meta := nodeMeta{}
 	if err := json.NewDecoder(in).Decode(&meta); err != nil {
-		return NodeMeta{}, errors.WithStack(err)
+		return nodeMeta{}, errors.WithStack(err)
 	}
 	return meta, nil
 }
 
-func nodeMetaToNode(meta NodeMeta) Node {
+func nodeMetaToNode(meta nodeMeta) Node {
 	if meta.IsVoter {
-		return &VoterNode{
+		return &voterNode{
 			id:           meta.ID,
 			addr:         meta.Addr,
 			port:         meta.Port,
@@ -91,7 +91,7 @@ func nodeMetaToNode(meta NodeMeta) Node {
 			nodeNumber:   meta.NodeNumber,
 		}
 	}
-	return &NonvoterNode{
+	return &nonvoterNode{
 		id:           meta.ID,
 		addr:         meta.Addr,
 		port:         meta.Port,
@@ -99,7 +99,7 @@ func nodeMetaToNode(meta NodeMeta) Node {
 	}
 }
 
-type VoterNode struct {
+type voterNode struct {
 	id           string
 	addr         string
 	port         int
@@ -111,77 +111,77 @@ type VoterNode struct {
 	nodeNumber   int64
 }
 
-func (vn *VoterNode) ID() string {
+func (vn *voterNode) ID() string {
 	return vn.id
 }
 
-func (vn *VoterNode) Addr() string {
+func (vn *voterNode) Addr() string {
 	return vn.addr
 }
 
-func (vn *VoterNode) Port() int {
+func (vn *voterNode) Port() int {
 	return vn.port
 }
 
-func (vn *VoterNode) IsVoterNode() bool {
+func (vn *voterNode) IsVoterNode() bool {
 	return true
 }
 
-func (vn *VoterNode) State() string {
+func (vn *voterNode) State() string {
 	return vn.state
 }
 
-func (vn *VoterNode) UserMetadata() []byte {
+func (vn *voterNode) UserMetadata() []byte {
 	return vn.userMetadata
 }
 
-func (vn *VoterNode) setUserMetadata(data []byte) {
+func (vn *voterNode) setUserMetadata(data []byte) {
 	vn.userMetadata = data
 }
 
-func (vn *VoterNode) setState(newState string) {
+func (vn *voterNode) setState(newState string) {
 	vn.state = newState
 }
 
-func (vn *VoterNode) resetVote() {
+func (vn *voterNode) resetVote() {
 	vn.numElection = 0
 	vn.numAnswer = 0
 }
 
-func (vn *VoterNode) incrementElection(n uint32) {
+func (vn *voterNode) incrementElection(n uint32) {
 	vn.numElection += n
 }
 
-func (vn *VoterNode) incrementAnswer(n uint32) {
+func (vn *voterNode) incrementAnswer(n uint32) {
 	vn.numAnswer += n
 }
 
-func (vn *VoterNode) getNumElection() uint32 {
+func (vn *voterNode) getNumElection() uint32 {
 	return vn.numElection
 }
 
-func (vn *VoterNode) getNumAnswer() uint32 {
+func (vn *voterNode) getNumAnswer() uint32 {
 	return vn.numAnswer
 }
 
-func (vn *VoterNode) setLeaderID(id string) {
+func (vn *voterNode) setLeaderID(id string) {
 	vn.leaderID = id
 }
 
-func (vn *VoterNode) IsLeader() bool {
+func (vn *voterNode) IsLeader() bool {
 	return vn.id == vn.leaderID
 }
 
-func (vn *VoterNode) setNodeNumber(num int64) {
+func (vn *voterNode) setNodeNumber(num int64) {
 	vn.nodeNumber = num
 }
 
-func (vn *VoterNode) getNodeNumber() int64 {
+func (vn *voterNode) getNodeNumber() int64 {
 	return vn.nodeNumber
 }
 
-func (vn *VoterNode) toJSON(out io.Writer) error {
-	return toJSON(out, NodeMeta{
+func (vn *voterNode) toJSON(out io.Writer) error {
+	return toJSON(out, nodeMeta{
 		ID:           vn.id,
 		Addr:         vn.addr,
 		Port:         vn.port,
@@ -195,8 +195,8 @@ func (vn *VoterNode) toJSON(out io.Writer) error {
 	})
 }
 
-func NewVoterNode(id string, addr string, port int, state string, nodeNum int64) *VoterNode {
-	return &VoterNode{
+func newVoterNode(id string, addr string, port int, state string, nodeNum int64) *voterNode {
+	return &voterNode{
 		id:         id,
 		addr:       addr,
 		port:       port,
@@ -206,46 +206,46 @@ func NewVoterNode(id string, addr string, port int, state string, nodeNum int64)
 }
 
 var (
-	_ Node = (*NonvoterNode)(nil)
+	_ Node = (*nonvoterNode)(nil)
 )
 
-type NonvoterNode struct {
+type nonvoterNode struct {
 	id           string
 	addr         string
 	port         int
 	userMetadata []byte
 }
 
-func (nn *NonvoterNode) ID() string {
+func (nn *nonvoterNode) ID() string {
 	return nn.id
 }
 
-func (nn *NonvoterNode) Addr() string {
+func (nn *nonvoterNode) Addr() string {
 	return nn.addr
 }
 
-func (nn *NonvoterNode) Port() int {
+func (nn *nonvoterNode) Port() int {
 	return nn.port
 }
 
-func (nn *NonvoterNode) IsVoterNode() bool {
+func (nn *nonvoterNode) IsVoterNode() bool {
 	return false
 }
 
-func (nn *NonvoterNode) IsLeader() bool {
+func (nn *nonvoterNode) IsLeader() bool {
 	return false
 }
 
-func (nn *NonvoterNode) UserMetadata() []byte {
+func (nn *nonvoterNode) UserMetadata() []byte {
 	return nn.userMetadata
 }
 
-func (nn *NonvoterNode) setUserMetadata(data []byte) {
+func (nn *nonvoterNode) setUserMetadata(data []byte) {
 	nn.userMetadata = data
 }
 
-func (nn *NonvoterNode) toJSON(out io.Writer) error {
-	return toJSON(out, NodeMeta{
+func (nn *nonvoterNode) toJSON(out io.Writer) error {
+	return toJSON(out, nodeMeta{
 		ID:           nn.id,
 		Addr:         nn.addr,
 		Port:         nn.port,
@@ -256,8 +256,8 @@ func (nn *NonvoterNode) toJSON(out io.Writer) error {
 	})
 }
 
-func NewNonvoterNode(id string, addr string, port int) *NonvoterNode {
-	return &NonvoterNode{
+func newNonvoterNode(id string, addr string, port int) *nonvoterNode {
+	return &nonvoterNode{
 		id:   id,
 		addr: addr,
 		port: port,

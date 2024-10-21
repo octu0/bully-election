@@ -1,0 +1,31 @@
+{
+    "[go]": {
+        "editor.defaultFormatter": "golang.go",
+        "editor.formatOnSaveMode": "file",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "always",
+        },
+    },
+    "go.formatTool": "gofmt",
+    "go.formatFlags": [],
+    "go.lintTool": "staticcheck",
+    "gopls": {
+        "ui.diagnostic.staticcheck": true,
+        "ui.semanticTokens": true,
+        "ui.diagnostic.analyses": {
+            "S1002": false,
+        },
+    },
+    "analyses": {
+        "composites": false,
+        "fieldalignment": false,
+        "fillreturns": true,
+        "simplifycompositelit": false,
+        "simplifyrange": false,
+        "simplifyslice": false,
+    },
+    "go.lintOnSave": "package",
+    "go.vetOnSave": "package",
+    "go.testOnSave": false,
+}

@@ -83,6 +83,15 @@ func startElection(parent context.Context, b *Bully) error {
 		return errors.WithStack(err)
 	}
 
+	// no voter = lat node
+	if len(voterNodes) < 1 {
+		b.setState(StateRunning)
+		if err := b.updateNode(); err != nil {
+			return errors.WithStack(err)
+		}
+		return nil
+	}
+
 	if err := leaderElection(ctx, b, voterNodes); err != nil {
 		return errors.WithStack(err)
 	}
@@ -196,7 +205,7 @@ func syncLeader(ctx context.Context, b *Bully, answerNodes []internalVoterNode) 
 	return leaderNode, nil
 }
 
-func handleMessage(ctx context.Context, b *Bully, msg Message) error {
+func handleMessage(_ context.Context, b *Bully, msg Message) error {
 	if b.IsVoter() != true {
 		return nil
 	}
@@ -224,6 +233,7 @@ func handleMessage(ctx context.Context, b *Bully, msg Message) error {
 		if err := b.updateNode(); err != nil {
 			return errors.Wrapf(err, "updateNode timeout")
 		}
+
 	case TransferLeaderMessage:
 		b.setState(StateTransferLeader)
 		if err := b.updateNode(); err != nil {
@@ -236,6 +246,7 @@ func handleMessage(ctx context.Context, b *Bully, msg Message) error {
 func waitNodeStateAnswered(ctx context.Context, b *Bully, expectNum int) ([]internalVoterNode, error) {
 	for {
 		voters := getVoterNodes(b)
+
 		num := numState(voters, StateAnswered)
 		if expectNum == num {
 			return voters, nil
