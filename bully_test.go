@@ -312,123 +312,125 @@ func TestCreateNonVoter(t *testing.T) {
 		}
 	})
 
-	// t.Run("TransferLeader", func(tt *testing.T) {
-	// 	conf1 := memberlist.DefaultLocalConfig()
-	// 	conf1.Name = "test1"
-	// 	conf1.BindAddr = "127.0.0.1"
-	// 	conf1.BindPort = 0
-	// 	conf1.AdvertiseAddr = "127.0.0.1"
-	// 	conf1.AdvertisePort = 0
-	// 	conf1.EnableCompression = false
+	t.Run("LeadershipTransfer", func(tt *testing.T) {
+		conf1 := memberlist.DefaultLocalConfig()
+		conf1.Name = "test1"
+		conf1.BindAddr = "127.0.0.1"
+		conf1.BindPort = 0
+		conf1.AdvertiseAddr = "127.0.0.1"
+		conf1.AdvertisePort = 0
+		conf1.EnableCompression = false
 
-	// 	conf2 := memberlist.DefaultLocalConfig()
-	// 	conf2.Name = "test2"
-	// 	conf2.BindAddr = "127.0.0.1"
-	// 	conf2.BindPort = 0
-	// 	conf2.AdvertiseAddr = "127.0.0.1"
-	// 	conf2.AdvertisePort = 0
-	// 	conf2.EnableCompression = false
+		conf2 := memberlist.DefaultLocalConfig()
+		conf2.Name = "test2"
+		conf2.BindAddr = "127.0.0.1"
+		conf2.BindPort = 0
+		conf2.AdvertiseAddr = "127.0.0.1"
+		conf2.AdvertisePort = 0
+		conf2.EnableCompression = false
 
-	// 	conf3 := memberlist.DefaultLocalConfig()
-	// 	conf3.Name = "test3"
-	// 	conf3.BindAddr = "127.0.0.1"
-	// 	conf3.BindPort = 0
-	// 	conf3.AdvertiseAddr = "127.0.0.1"
-	// 	conf3.AdvertisePort = 0
-	// 	conf3.EnableCompression = false
+		conf3 := memberlist.DefaultLocalConfig()
+		conf3.Name = "test3"
+		conf3.BindAddr = "127.0.0.1"
+		conf3.BindPort = 0
+		conf3.AdvertiseAddr = "127.0.0.1"
+		conf3.AdvertisePort = 0
+		conf3.EnableCompression = false
 
-	// 	ctx, cancel := context.WithCancel(context.Background())
-	// 	b1, err := CreateVoter(ctx, conf1,
-	// 		WithObserveFunc(func(b *Bully, evt NodeEvent) {
-	// 			tt.Logf("[1] evt=%s", evt)
-	// 		}),
-	// 		WithOnErrorFunc(func(err error) {
-	// 			tt.Fatalf("[1] on error=%+v", err)
-	// 			cancel()
-	// 		}),
-	// 	)
-	// 	if err != nil {
-	// 		tt.Fatalf("CreateVoter: %+v", err)
-	// 	}
-	// 	tt.Logf("[1] addr=%s", b1.Address())
+		ctx, cancel := context.WithCancel(context.Background())
+		b1, err := CreateVoter(ctx, conf1,
+			WithObserveFunc(func(b *Bully, evt NodeEvent) {
+				tt.Logf("[1] evt=%s", evt)
+			}),
+			WithOnErrorFunc(func(err error) {
+				tt.Fatalf("[1] on error=%+v", err)
+				cancel()
+			}),
+		)
+		if err != nil {
+			tt.Fatalf("CreateVoter: %+v", err)
+		}
+		tt.Logf("[1] addr=%s", b1.Address())
 
-	// 	b2, err := CreateVoter(ctx, conf2,
-	// 		WithObserveFunc(func(b *Bully, evt NodeEvent) {
-	// 			tt.Logf("[2] evt=%s", evt)
-	// 		}),
-	// 		WithOnErrorFunc(func(err error) {
-	// 			tt.Fatalf("[2] on error=%+v", err)
-	// 			cancel()
-	// 		}),
-	// 	)
-	// 	if err != nil {
-	// 		tt.Fatalf("CreateVoter: %+v", err)
-	// 	}
-	// 	tt.Logf("[2] addr=%s", b2.Address())
+		b2, err := CreateVoter(ctx, conf2,
+			WithObserveFunc(func(b *Bully, evt NodeEvent) {
+				tt.Logf("[2] evt=%s", evt)
+			}),
+			WithOnErrorFunc(func(err error) {
+				tt.Fatalf("[2] on error=%+v", err)
+				cancel()
+			}),
+		)
+		if err != nil {
+			tt.Fatalf("CreateVoter: %+v", err)
+		}
+		tt.Logf("[2] addr=%s", b2.Address())
 
-	// 	b3, err := CreateNonVoter(ctx, conf3,
-	// 		WithObserveFunc(func(b *Bully, evt NodeEvent) {
-	// 			tt.Logf("[3] evt=%s", evt)
-	// 		}),
-	// 		WithOnErrorFunc(func(err error) {
-	// 			tt.Fatalf("[3] on error=%+v", err)
-	// 			cancel()
-	// 		}),
-	// 	)
-	// 	if err != nil {
-	// 		tt.Fatalf("CreateNonVoter: %+v", err)
-	// 	}
-	// 	tt.Logf("[3] addr=%s", b3.Address())
+		b3, err := CreateNonVoter(ctx, conf3,
+			WithObserveFunc(func(b *Bully, evt NodeEvent) {
+				tt.Logf("[3] evt=%s", evt)
+			}),
+			WithOnErrorFunc(func(err error) {
+				tt.Fatalf("[3] on error=%+v", err)
+				cancel()
+			}),
+		)
+		if err != nil {
+			tt.Fatalf("CreateNonVoter: %+v", err)
+		}
+		tt.Logf("[3] addr=%s", b3.Address())
 
-	// 	if err := b2.Join(b1.Address()); err != nil {
-	// 		tt.Fatalf("Join: %+v", err)
-	// 	}
-	// 	if err := b3.Join(b1.Address()); err != nil {
-	// 		tt.Fatalf("Join: %+v", err)
-	// 	}
+		if err := b2.Join(b1.Address()); err != nil {
+			tt.Fatalf("Join: %+v", err)
+		}
+		if err := b3.Join(b1.Address()); err != nil {
+			tt.Fatalf("Join: %+v", err)
+		}
 
-	// 	members := b3.Members()
-	// 	if len(members) != 3 {
-	// 		tt.Errorf("2 voter + 1 nonvoter")
-	// 	}
-	// 	leaderID := ""
-	// 	numLeader := 0
-	// 	for _, m := range members {
-	// 		if m.IsLeader() {
-	// 			numLeader += 1
-	// 			leaderID = m.ID()
-	// 		}
-	// 	}
-	// 	if numLeader != 1 {
-	// 		tt.Errorf("one leader")
-	// 	}
-	// 	if leaderID != b1.ID() {
-	// 		tt.Errorf("leader = b1: %s", leaderID)
-	// 	}
+		members := b3.Members()
+		if len(members) != 3 {
+			tt.Errorf("2 voter + 1 nonvoter")
+		}
+		leaderID := ""
+		numLeader := 0
+		for _, m := range members {
+			if m.IsLeader() {
+				numLeader += 1
+				leaderID = m.ID()
+			}
+		}
+		if numLeader != 1 {
+			tt.Errorf("one leader")
+		}
+		if leaderID != b1.ID() {
+			tt.Errorf("leader = b1: %s", leaderID)
+		}
 
-	// 	if err := b1.TransferLeader(); err != nil {
-	// 		tt.Fatalf("TransferLeader: %+v", err)
-	// 	}
+		c, can := context.WithTimeout(ctx, 10*time.Second)
+		defer can()
+		if err := b1.LeadershipTransfer(c); err != nil {
+			tt.Fatalf("LeadershipTransfer: %+v", err)
+		}
 
-	// 	members = b3.Members()
-	// 	if len(members) != 3 {
-	// 		tt.Errorf("2 voter + 1 nonvoter")
-	// 	}
-	// 	leaderID = ""
-	// 	numLeader = 0
-	// 	for _, m := range members {
-	// 		if m.IsLeader() {
-	// 			numLeader += 1
-	// 			leaderID = m.ID()
-	// 		}
-	// 	}
-	// 	if numLeader != 1 {
-	// 		tt.Errorf("one leader")
-	// 	}
-	// 	if leaderID != b2.ID() {
-	// 		tt.Errorf("leader = b2: %s", leaderID)
-	// 	}
-	// })
+		members = b3.Members()
+		if len(members) != 3 {
+			tt.Errorf("2 voter + 1 nonvoter")
+		}
+		leaderID = ""
+		numLeader = 0
+		for _, m := range members {
+			if m.IsLeader() {
+				numLeader += 1
+				leaderID = m.ID()
+			}
+		}
+		if numLeader != 1 {
+			tt.Errorf("one leader")
+		}
+		if leaderID != b2.ID() {
+			tt.Errorf("leader = b2: %s", leaderID)
+		}
+	})
 }
 
 func TestMetadata(t *testing.T) {
