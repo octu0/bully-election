@@ -7,7 +7,7 @@
 
 Hashicorp's [memberlist](https://github.com/hashicorp/memberlist) based [Bully Leader Election](https://en.wikipedia.org/wiki/Bully_algorithm).
 
-Features
+Features:
 - Simple API
 - Voter / Nonvoter node state management(monitoring)
 - TransferLeadership
@@ -49,14 +49,12 @@ func main() {
 			log.Printf("error=%+v", err)
 		}),
 	)
-
 	err := b.Join("10.0.0.1")
 	b.IsLeader()
 	b.UpdateMetadata([]byte("hello world"))
 
 	nn, _ := bullyelection.CreateNonVoter(ctx, conf2)
 	err := nn.Join("10.0.0.1")
-	members := nn.Members()
 	for _, m := range nn.Members() {
 		_ = m.UserMetadata()
 	}
