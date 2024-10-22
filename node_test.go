@@ -42,7 +42,7 @@ func TestNodeMeta(t *testing.T) {
 		if node.Addr() != "testaddr" {
 			tt.Errorf("Addr")
 		}
-		if node.IsVoterNode() != true {
+		if node.IsVoter() != true {
 			tt.Errorf("IsVoterNode")
 		}
 		if bytes.Equal(node.UserMetadata(), []byte("testusermetadata")) != true {
@@ -72,7 +72,7 @@ func TestNodeMeta(t *testing.T) {
 		if node.Addr() != "testaddr" {
 			tt.Errorf("Addr")
 		}
-		if node.IsVoterNode() != true {
+		if node.IsVoter() != true {
 			tt.Errorf("IsVoterNode")
 		}
 		if bytes.Equal(node.UserMetadata(), []byte{}) != true {

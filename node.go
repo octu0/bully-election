@@ -14,7 +14,7 @@ type Node interface {
 	setPort(int)
 
 	// node type
-	IsVoterNode() bool
+	IsVoter() bool
 
 	// leader
 	IsLeader() bool
@@ -117,7 +117,7 @@ func (vn *voterNode) setPort(p int) {
 	vn.port = p
 }
 
-func (vn *voterNode) IsVoterNode() bool {
+func (vn *voterNode) IsVoter() bool {
 	return true
 }
 
@@ -205,7 +205,7 @@ func (nn *nonvoterNode) setPort(p int) {
 	nn.port = p
 }
 
-func (nn *nonvoterNode) IsVoterNode() bool {
+func (nn *nonvoterNode) IsVoter() bool {
 	return false
 }
 

@@ -3,9 +3,7 @@ package bullyelection
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"time"
 
@@ -17,39 +15,6 @@ var (
 	ErrSyncCoordinator         = errors.New("sync coordinator")
 	ErrBeginTransferLeadership = errors.New("transfer_leadership begging")
 )
-
-type ElectionState string
-
-const (
-	StateInitial            ElectionState = "init"
-	StateRunning            ElectionState = "running"
-	StateElecting           ElectionState = "electing"
-	StateTransferLeadership ElectionState = "transfer_leader"
-)
-
-func (s ElectionState) String() string {
-	return string(s)
-}
-
-type Message struct {
-	Type   NodeMessageType `json:"type"`
-	NodeID string          `json:"node-id"`
-}
-
-func marshalNodeMessage(out io.Writer, msgType NodeMessageType, nodeID string) error {
-	if err := json.NewEncoder(out).Encode(Message{msgType, nodeID}); err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
-}
-
-func unmarshalNodeMessage(in io.Reader) (Message, error) {
-	msg := Message{}
-	if err := json.NewDecoder(in).Decode(&msg); err != nil {
-		return Message{}, errors.WithStack(err)
-	}
-	return msg, nil
-}
 
 func (b *Bully) startElection(ctx context.Context) (err error) {
 	defer func() {
@@ -66,7 +31,7 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.node.IsVoterNode() != true {
+	if b.node.IsVoter() != true {
 		return nil
 	}
 
@@ -163,7 +128,7 @@ func isAllState(nodes []internalVoterNode, targetState ElectionState) bool {
 func filterVoterNodes(members []Node) []internalVoterNode {
 	voters := make([]internalVoterNode, 0, len(members))
 	for _, m := range members {
-		if m.IsVoterNode() {
+		if m.IsVoter() {
 			voters = append(voters, m.(internalVoterNode))
 		}
 	}

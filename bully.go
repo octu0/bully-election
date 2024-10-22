@@ -3,7 +3,9 @@ package bullyelection
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -81,6 +83,39 @@ func (m NodeMessageType) String() string {
 		return "msg<TransferLeadership>"
 	}
 	return "unknown message"
+}
+
+type ElectionState string
+
+const (
+	StateInitial            ElectionState = "init"
+	StateRunning            ElectionState = "running"
+	StateElecting           ElectionState = "electing"
+	StateTransferLeadership ElectionState = "transfer_leader"
+)
+
+func (s ElectionState) String() string {
+	return string(s)
+}
+
+type Message struct {
+	Type   NodeMessageType `json:"type"`
+	NodeID string          `json:"node-id"`
+}
+
+func marshalNodeMessage(out io.Writer, msgType NodeMessageType, nodeID string) error {
+	if err := json.NewEncoder(out).Encode(Message{msgType, nodeID}); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
+}
+
+func unmarshalNodeMessage(in io.Reader) (Message, error) {
+	msg := Message{}
+	if err := json.NewDecoder(in).Decode(&msg); err != nil {
+		return Message{}, errors.WithStack(err)
+	}
+	return msg, nil
 }
 
 type (
@@ -219,7 +254,7 @@ func (b *Bully) IsVoter() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	return b.node.IsVoterNode()
+	return b.node.IsVoter()
 }
 
 func (b *Bully) ID() string {
@@ -241,6 +276,16 @@ func (b *Bully) IsLeader() bool {
 	defer b.mu.RUnlock()
 
 	return b.node.IsLeader()
+}
+
+func (b *Bully) State() ElectionState {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if vn, ok := b.node.(internalVoterNode); ok {
+		return ElectionState(vn.getState())
+	}
+	return ""
 }
 
 func (b *Bully) UpdateMetadata(data []byte) error {
@@ -438,7 +483,7 @@ func (b *Bully) sendTransferLeaderMessage(targetNodeID string) error {
 	return b.send(targetNodeID, buf.Bytes())
 }
 
-func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh chan *hookNodeEventMsg) {
+func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh chan *nodeEventMsg) {
 	defer b.wg.Done()
 
 	for {
@@ -466,7 +511,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 			case TransferLeadershipMessage:
 				b.opt.logger.Printf("info: transfer_leadership message: %s", msg.NodeID)
 
-				evtMsg := &hookNodeEventMsg{TransferLeadershipEvent}
+				evtMsg := &nodeEventMsg{TransferLeadershipEvent}
 				select {
 				case evtCh <- evtMsg:
 					// ok
@@ -478,7 +523,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 	}
 }
 
-func (b *Bully) readNodeEventLoop(ctx context.Context, ch chan *hookNodeEventMsg) {
+func (b *Bully) readNodeEventLoop(ctx context.Context, ch chan *nodeEventMsg) {
 	defer b.wg.Done()
 
 	for {
@@ -534,7 +579,7 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 	ctx, cancel := context.WithCancel(parent)
 	ready := newAtomicReadyStatus()
 	msgCh := make(chan []byte)
-	evtCh := make(chan *hookNodeEventMsg)
+	evtCh := make(chan *nodeEventMsg)
 
 	resolvLater := false
 	if conf.BindPort == 0 && conf.AdvertisePort == 0 {
@@ -542,8 +587,8 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 	}
 
 	node := createNode(opt.ulidGeneratorFunc())
-	conf.Delegate = newHookNodeMessage(opt, ready, msgCh, node)
-	conf.Events = newHooNodeEvent(opt, ready, evtCh)
+	conf.Delegate = newObserveNodeMessage(opt, ready, msgCh, node)
+	conf.Events = newObserveNodeEvent(opt, ready, evtCh)
 
 	list, err := memberlist.Create(conf)
 	if err != nil {
@@ -578,109 +623,6 @@ func CreateNonVoter(parent context.Context, conf *memberlist.Config, funcs ...Bu
 	return createBully(parent, conf, funcs, func(ulid string) Node {
 		return newNonvoterNode(conf.Name, ulid, conf.AdvertiseAddr, conf.AdvertisePort)
 	})
-}
-
-var (
-	_ memberlist.Delegate = (*hookNodeMessage)(nil)
-)
-
-type hookNodeMessage struct {
-	opt   *bullyOpt
-	ready *atomicReadyStatus
-	msgCh chan []byte
-	node  Node
-}
-
-func (d *hookNodeMessage) GetBroadcasts(overhead int, limit int) [][]byte {
-	// nop
-	return nil
-}
-
-func (d *hookNodeMessage) LocalState(join bool) []byte {
-	// nop
-	return nil
-}
-
-func (d *hookNodeMessage) MergeRemoteState(buf []byte, join bool) {
-	// nop
-}
-
-func (d *hookNodeMessage) NodeMeta(limit int) []byte {
-	buf := bytes.NewBuffer(nil)
-	if err := d.node.toJSON(buf); err != nil {
-		d.opt.logger.Printf("warn: node.ToJSON %+v", errors.WithStack(err))
-		return nil
-	}
-	return buf.Bytes()
-}
-
-func (d *hookNodeMessage) NotifyMsg(msg []byte) {
-	if d.ready.IsOk() != true {
-		return // drop
-	}
-
-	select {
-	case d.msgCh <- msg:
-		// ok
-	case <-time.After(d.opt.retryNodeMsgTimeout):
-		d.opt.logger.Printf("warn: msgCh maybe hangup, drop msg: %s", msg)
-	}
-}
-
-func newHookNodeMessage(opt *bullyOpt, ready *atomicReadyStatus, ch chan []byte, node Node) *hookNodeMessage {
-	return &hookNodeMessage{opt, ready, ch, node}
-}
-
-var (
-	_ memberlist.EventDelegate = (*hookNodeEvent)(nil)
-)
-
-type hookNodeEventMsg struct {
-	evt NodeEvent
-}
-
-type hookNodeEvent struct {
-	opt   *bullyOpt
-	ready *atomicReadyStatus
-	evtCh chan *hookNodeEventMsg
-}
-
-func (e *hookNodeEvent) NotifyJoin(node *memberlist.Node) {
-	if e.ready.IsOk() != true {
-		return // drop
-	}
-
-	e.opt.logger.Printf("info: join event: name=%s addr=%s", node.Name, node.Address())
-	msg := &hookNodeEventMsg{JoinEvent}
-	select {
-	case e.evtCh <- msg:
-		// ok
-	case <-time.After(e.opt.retryNodeEventTimeout):
-		e.opt.logger.Printf("warn: evtCh maybe hangup(join), drop msg: %+v", msg)
-	}
-}
-
-func (e *hookNodeEvent) NotifyLeave(node *memberlist.Node) {
-	if e.ready.IsOk() != true {
-		return // drop
-	}
-
-	e.opt.logger.Printf("info: leave event: name=%s addr=%s", node.Name, node.Address())
-	msg := &hookNodeEventMsg{LeaveEvent}
-	select {
-	case e.evtCh <- msg:
-		// ok
-	case <-time.After(e.opt.retryNodeEventTimeout):
-		e.opt.logger.Printf("warn: evtCh maybe hangup(leave), drop msg: %+v", msg)
-	}
-}
-
-func (e *hookNodeEvent) NotifyUpdate(node *memberlist.Node) {
-	// nop
-}
-
-func newHooNodeEvent(opt *bullyOpt, ready *atomicReadyStatus, ch chan *hookNodeEventMsg) *hookNodeEvent {
-	return &hookNodeEvent{opt, ready, ch}
 }
 
 type readyStatus int32
