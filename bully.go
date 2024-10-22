@@ -29,6 +29,7 @@ const (
 	DefaultRetryNodeMsgTimeout     = 15 * time.Second
 	DefaultRetryNodeEventTimeout   = 15 * time.Second
 	DefaultRetryNodeEventsInterval = 100 * time.Millisecond
+	DefaultStepInterval            = 1 * time.Second // workaround
 )
 
 var (
@@ -139,18 +140,19 @@ func DefaultOnErrorFunc(err error) {
 type BullyOptFunc func(*bullyOpt)
 
 type bullyOpt struct {
-	observeFunc           ObserveFunc
-	electionTimeout       time.Duration
-	electionInterval      time.Duration
-	updateNodeTimeout     time.Duration
-	joinNodeTimeout       time.Duration
-	leaveNodeTimeout      time.Duration
-	transferLeaderTimeout time.Duration
-	retryNodeMsgTimeout   time.Duration
-	retryNodeEventTimeout time.Duration
-	ulidGeneratorFunc     ULIDGeneratorFunc
-	onErrorFunc           OnErrorFunc
-	logger                *log.Logger
+	observeFunc            ObserveFunc
+	electionTimeout        time.Duration
+	electionInterval       time.Duration
+	updateNodeTimeout      time.Duration
+	joinNodeTimeout        time.Duration
+	leaveNodeTimeout       time.Duration
+	transferLeaderTimeout  time.Duration
+	retryNodeMsgTimeout    time.Duration
+	retryNodeEventTimeout  time.Duration
+	ulidGeneratorFunc      ULIDGeneratorFunc
+	onErrorFunc            OnErrorFunc
+	logger                 *log.Logger
+	workaroundStepInterval time.Duration
 }
 
 func WithObserveFunc(f ObserveFunc) BullyOptFunc {
@@ -221,17 +223,18 @@ func WithOnErrorFunc(f OnErrorFunc) BullyOptFunc {
 
 func newBullyOpt(opts []BullyOptFunc) *bullyOpt {
 	opt := &bullyOpt{
-		electionTimeout:       DefaultElectionTimeout,
-		electionInterval:      DefaultElectionInterval,
-		updateNodeTimeout:     DefaultUpdateNodeTimeout,
-		joinNodeTimeout:       DefaultJoinNodeTimeout,
-		leaveNodeTimeout:      DefaultLeaveNodeTimeout,
-		transferLeaderTimeout: DefaultTransferLeaderTimeout,
-		retryNodeMsgTimeout:   DefaultRetryNodeMsgTimeout,
-		retryNodeEventTimeout: DefaultRetryNodeEventTimeout,
-		observeFunc:           DefaultObserverFunc,
-		ulidGeneratorFunc:     DefaultULIDGeneratorFunc,
-		onErrorFunc:           DefaultOnErrorFunc,
+		electionTimeout:        DefaultElectionTimeout,
+		electionInterval:       DefaultElectionInterval,
+		updateNodeTimeout:      DefaultUpdateNodeTimeout,
+		joinNodeTimeout:        DefaultJoinNodeTimeout,
+		leaveNodeTimeout:       DefaultLeaveNodeTimeout,
+		transferLeaderTimeout:  DefaultTransferLeaderTimeout,
+		retryNodeMsgTimeout:    DefaultRetryNodeMsgTimeout,
+		retryNodeEventTimeout:  DefaultRetryNodeEventTimeout,
+		observeFunc:            DefaultObserverFunc,
+		ulidGeneratorFunc:      DefaultULIDGeneratorFunc,
+		onErrorFunc:            DefaultOnErrorFunc,
+		workaroundStepInterval: DefaultStepInterval,
 	}
 	for _, f := range opts {
 		f(opt)
@@ -325,6 +328,7 @@ func (b *Bully) Join(addr string) error {
 	if addr == b.list.LocalNode().Address() {
 		return nil // skip self join
 	}
+
 	wait := make(chan error)
 	b.mu.Lock()
 	b.waitElection = wait
@@ -335,6 +339,21 @@ func (b *Bully) Join(addr string) error {
 		b.mu.Unlock()
 	}()
 
+	// default state = electing
+	if err := func() error {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+
+		b.setState(StateElecting)
+		if err := b.updateNode(); err != nil {
+			return errors.Wrapf(ErrBullyInitialize, "state change : %s", StateElecting)
+		}
+		return nil
+	}(); err != nil {
+		return errors.WithStack(err)
+	}
+
+	b.opt.logger.Printf("info: join %s", addr)
 	if _, err := b.list.Join([]string{addr}); err != nil {
 		return errors.WithStack(err)
 	}
@@ -501,6 +520,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 			switch msg.Type {
 			case CoordinatorMessage:
 				b.opt.logger.Printf("info: coordinator message: %s", msg.NodeID)
+
 				b.setLeaderID(msg.NodeID)
 				b.setState(StateRunning)
 				if err := b.updateNode(); err != nil {

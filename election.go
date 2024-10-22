@@ -43,6 +43,9 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 		return errors.WithStack(err)
 	}
 
+	// TODO: sync other nodes
+	<-time.After(b.opt.workaroundStepInterval)
+
 	if len(nodes) < 1 {
 		return nil
 	}
@@ -60,9 +63,13 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 		}
 	}
 
+	// TODO: sync other nodes
+	<-time.After(b.opt.workaroundStepInterval)
+
 	if _, err := waitVoterNodes(ctx, b, StateRunning); err != nil {
 		return errors.WithStack(err)
 	}
+
 	return nil
 }
 
