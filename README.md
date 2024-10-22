@@ -5,9 +5,12 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/octu0/bully-election)](https://goreportcard.com/report/github.com/octu0/bully-election)
 [![Releases](https://img.shields.io/github/v/release/octu0/bully-election)](https://github.com/octu0/bully-election/releases)
 
-[memberlist](https://github.com/hashicorp/memberlist) based [Bully Election](https://en.wikipedia.org/wiki/Bully_algorithm).
+Hashicorp's [memberlist](https://github.com/hashicorp/memberlist) based [Bully Leader Election](https://en.wikipedia.org/wiki/Bully_algorithm).
 
-this implementation contains `Voter / Novoter` so the leader election status can be retrieved without including it in the cluster.
+Features
+- Simple API
+- Voter / Nonvoter node state management(monitoring)
+- TransferLeadership
 
 ## Installation
 
@@ -18,6 +21,8 @@ go get github.com/octu0/bully-election
 ## Example
 
 ```go
+package main
+
 import (
 	"context"
 	"log"
@@ -29,23 +34,33 @@ import (
 
 func main() {
 	ctx := context.Background()
-	conf := memberlist.DefaultLocalConfig()
+	conf := memberlist.DefaultLANConfig()
 	conf.Name = "node1"
 	conf.BindPort = 7947
 	conf.AdvertiseAddr = "10.0.0.123"
 	conf.AdvertisePort = conf.BindPort
 
-	b, err := CreateVoter(ctx, conf,
+	b, err := bullyelection.CreateVoter(ctx, conf,
 		WithElectionTimeout(1*time.Second),
-		WithObserveFunc(func(b *Bully, evt NodeEvent) {
+		WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent) {
 			log.Printf("evt=%s", evt)
 		}),
 		WithOnErrorFunc(func(err error) {
 			log.Printf("error=%+v", err)
 		}),
 	)
+
 	err := b.Join("10.0.0.1")
 	b.IsLeader()
+	b.UpdateMetadata([]byte("hello world"))
+
+	nn, _ := bullyelection.CreateNonVoter(ctx, conf2)
+	err := nn.Join("10.0.0.1")
+	members := nn.Members()
+	for _, m := range nn.Members() {
+		_ = m.UserMetadata()
+	}
+
 	b.Leave()
 }
 ```
