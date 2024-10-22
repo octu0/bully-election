@@ -3,8 +3,10 @@ package bullyelection
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -108,6 +110,7 @@ type bullyOpt struct {
 	transferLeaderTimeout time.Duration
 	ulidGeneratorFunc     ULIDGeneratorFunc
 	onErrorFunc           OnErrorFunc
+	logger                *log.Logger
 }
 
 func WithObserveFunc(f ObserveFunc) BullyOptFunc {
@@ -245,7 +248,7 @@ func (b *Bully) listNodes() []Node {
 	for i, member := range members {
 		meta, err := fromJSON(bytes.NewReader(member.Meta))
 		if err != nil {
-			log.Printf("warn: fromJSON(%s):%+v", member.Meta, errors.WithStack(err))
+			b.opt.logger.Printf("warn: fromJSON(%s):%+v", member.Meta, errors.WithStack(err))
 			continue
 		}
 
@@ -329,12 +332,14 @@ func (b *Bully) LeadershipTransfer(ctx context.Context) error {
 }
 
 func (b *Bully) Shutdown() error {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	err := b.list.Shutdown()
+	b.mu.Unlock()
 
-	if err := b.list.Shutdown(); err != nil {
+	if err != nil {
 		return errors.WithStack(err)
 	}
+
 	b.cancel()
 	b.wg.Wait()
 	return nil
@@ -431,7 +436,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 
 			switch msg.Type {
 			case CoordinatorMessage:
-				log.Printf("info: coordinator message: %s", msg.NodeID)
+				b.opt.logger.Printf("info: coordinator message: %s", msg.NodeID)
 				b.setLeaderID(msg.NodeID)
 				b.setState(StateRunning)
 				if err := b.updateNode(); err != nil {
@@ -440,14 +445,14 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 				}
 
 			case TransferLeadershipMessage:
-				log.Printf("info: transfer_leadership message: %s", msg.NodeID)
+				b.opt.logger.Printf("info: transfer_leadership message: %s", msg.NodeID)
 
 				evtMsg := &hookNodeEventMsg{TransferLeadershipEvent}
 				select {
 				case evtCh <- evtMsg:
 					// ok
 				default:
-					log.Printf("warn: evtCh maybe hangup(transfer_leadership), drop msg: %+v", msg)
+					b.opt.logger.Printf("warn: evtCh maybe hangup(transfer_leadership), drop msg: %+v", msg)
 				}
 			}
 		}
@@ -503,6 +508,9 @@ type createNodeFunc func(ulid string) Node
 
 func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyOptFunc, createNode createNodeFunc) (*Bully, error) {
 	opt := newBullyOpt(funcs)
+	if opt.logger == nil {
+		opt.logger = log.New(os.Stderr, conf.Name+" ", log.Ldate|log.Ltime|log.Lshortfile)
+	}
 
 	ctx, cancel := context.WithCancel(parent)
 	ready := newAtomicReadyStatus()
@@ -515,8 +523,8 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 	}
 
 	node := createNode(opt.ulidGeneratorFunc())
-	conf.Delegate = newHookNodeMessage(ready, msgCh, node)
-	conf.Events = newHooNodeEvent(ready, evtCh)
+	conf.Delegate = newHookNodeMessage(opt, ready, msgCh, node)
+	conf.Events = newHooNodeEvent(opt, ready, evtCh)
 
 	list, err := memberlist.Create(conf)
 	if err != nil {
@@ -525,6 +533,7 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 	}
 	if resolvLater {
 		node.setPort(int(list.LocalNode().Port))
+		opt.logger.SetPrefix(fmt.Sprintf("%s(%s:%d) ", node.ID(), node.Addr(), node.Port()))
 	}
 
 	b := newBully(ready, cancel, node, list, opt)
@@ -557,6 +566,7 @@ var (
 )
 
 type hookNodeMessage struct {
+	opt   *bullyOpt
 	ready *atomicReadyStatus
 	msgCh chan []byte
 	node  Node
@@ -579,7 +589,7 @@ func (d *hookNodeMessage) MergeRemoteState(buf []byte, join bool) {
 func (d *hookNodeMessage) NodeMeta(limit int) []byte {
 	buf := bytes.NewBuffer(nil)
 	if err := d.node.toJSON(buf); err != nil {
-		log.Printf("warn: node.ToJSON %+v", errors.WithStack(err))
+		d.opt.logger.Printf("warn: node.ToJSON %+v", errors.WithStack(err))
 		return nil
 	}
 	return buf.Bytes()
@@ -594,12 +604,12 @@ func (d *hookNodeMessage) NotifyMsg(msg []byte) {
 	case d.msgCh <- msg:
 		// ok
 	default:
-		log.Printf("warn: msgCh maybe hangup, drop msg: %s", msg)
+		d.opt.logger.Printf("warn: msgCh maybe hangup, drop msg: %s", msg)
 	}
 }
 
-func newHookNodeMessage(ready *atomicReadyStatus, ch chan []byte, node Node) *hookNodeMessage {
-	return &hookNodeMessage{ready, ch, node}
+func newHookNodeMessage(opt *bullyOpt, ready *atomicReadyStatus, ch chan []byte, node Node) *hookNodeMessage {
+	return &hookNodeMessage{opt, ready, ch, node}
 }
 
 var (
@@ -611,6 +621,7 @@ type hookNodeEventMsg struct {
 }
 
 type hookNodeEvent struct {
+	opt   *bullyOpt
 	ready *atomicReadyStatus
 	evtCh chan *hookNodeEventMsg
 }
@@ -620,13 +631,13 @@ func (e *hookNodeEvent) NotifyJoin(node *memberlist.Node) {
 		return // drop
 	}
 
-	log.Printf("info: join event: name=%s addr=%s", node.Name, node.Address())
+	e.opt.logger.Printf("info: join event: name=%s addr=%s", node.Name, node.Address())
 	msg := &hookNodeEventMsg{JoinEvent}
 	select {
 	case e.evtCh <- msg:
 		// ok
 	default:
-		log.Printf("warn: evtCh maybe hangup(join), drop msg: %+v", msg)
+		e.opt.logger.Printf("warn: evtCh maybe hangup(join), drop msg: %+v", msg)
 	}
 }
 
@@ -635,13 +646,13 @@ func (e *hookNodeEvent) NotifyLeave(node *memberlist.Node) {
 		return // drop
 	}
 
-	log.Printf("info: leave event: name=%s addr=%s", node.Name, node.Address())
+	e.opt.logger.Printf("info: leave event: name=%s addr=%s", node.Name, node.Address())
 	msg := &hookNodeEventMsg{LeaveEvent}
 	select {
 	case e.evtCh <- msg:
 		// ok
 	default:
-		log.Printf("warn: evtCh maybe hangup(leave), drop msg: %+v", msg)
+		e.opt.logger.Printf("warn: evtCh maybe hangup(leave), drop msg: %+v", msg)
 	}
 }
 
@@ -649,8 +660,8 @@ func (e *hookNodeEvent) NotifyUpdate(node *memberlist.Node) {
 	// nop
 }
 
-func newHooNodeEvent(ready *atomicReadyStatus, ch chan *hookNodeEventMsg) *hookNodeEvent {
-	return &hookNodeEvent{ready, ch}
+func newHooNodeEvent(opt *bullyOpt, ready *atomicReadyStatus, ch chan *hookNodeEventMsg) *hookNodeEvent {
+	return &hookNodeEvent{opt, ready, ch}
 }
 
 type readyStatus int32

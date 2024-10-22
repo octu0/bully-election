@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"time"
 
@@ -59,7 +58,7 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 			case b.waitElection <- err:
 				// ok
 			default:
-				log.Printf("warn: no reader: wait election, drop")
+				b.opt.logger.Printf("warn: no reader: wait election, drop")
 			}
 		}
 	}()
