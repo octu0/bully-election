@@ -28,6 +28,9 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 		}
 	}()
 
+	b.opt.logger.Printf("debug: start election")
+	defer b.opt.logger.Printf("debug: end election")
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
