@@ -7,56 +7,44 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/pkg/errors"
 )
 
 var (
-	ErrElectionTimeout       = errors.New("election timeout")
-	ErrTooManyLeader         = errors.New("too many leader")
-	ErrNoLeader              = errors.New("no leader")
-	ErrSyncCoordinator       = errors.New("sync coordinator")
-	ErrNodeNotReadyCondition = errors.New("node not ready condition")
-	ErrBeginTransferLeader   = errors.New("begin transfer leader")
+	ErrElectionTimeout         = errors.New("election timeout")
+	ErrSyncCoordinator         = errors.New("sync coordinator")
+	ErrBeginTransferLeadership = errors.New("transfer_leadership begging")
 )
 
-type State string
+type ElectionState string
 
 const (
-	StateInitial        State = "init"
-	StateRunning        State = "running"
-	StateElecting       State = "electing"
-	StateAnswered       State = "answered"
-	StateTransferLeader State = "transfer-leader"
+	StateInitial            ElectionState = "init"
+	StateRunning            ElectionState = "running"
+	StateElecting           ElectionState = "electing"
+	StateTransferLeadership ElectionState = "transfer_leader"
 )
 
-func (s State) String() string {
+func (s ElectionState) String() string {
 	return string(s)
 }
 
-type MessageType uint8
-
-const (
-	ElectionMessage MessageType = iota + 1
-	AnswerMessage
-	CoordinatorMessage
-	TransferLeaderMessage
-)
-
 type Message struct {
-	Type   MessageType `json:"type"`
-	NodeID string      `json:"node-id"`
+	Type   NodeMessageType `json:"type"`
+	NodeID string          `json:"node-id"`
 }
 
-func marshalMessage(out io.Writer, msgType MessageType, nodeID string) error {
+func marshalNodeMessage(out io.Writer, msgType NodeMessageType, nodeID string) error {
 	if err := json.NewEncoder(out).Encode(Message{msgType, nodeID}); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func unmarshalMessage(in io.Reader) (Message, error) {
+func unmarshalNodeMessage(in io.Reader) (Message, error) {
 	msg := Message{}
 	if err := json.NewDecoder(in).Decode(&msg); err != nil {
 		return Message{}, errors.WithStack(err)
@@ -64,172 +52,87 @@ func unmarshalMessage(in io.Reader) (Message, error) {
 	return msg, nil
 }
 
-func startElection(parent context.Context, b *Bully) error {
-	if b.IsVoter() != true {
+func (b *Bully) startElection(ctx context.Context) (err error) {
+	defer func() {
+		if b.waitElection != nil {
+			select {
+			case b.waitElection <- err:
+				// ok
+			default:
+				log.Printf("warn: no reader: wait election, drop")
+			}
+		}
+	}()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.node.IsVoterNode() != true {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(parent, b.opt.electionTimeout)
-	defer cancel()
-
-	b.setState(StateElecting)
-	b.resetVote()
-	if err := b.updateNode(); err != nil {
-		return errors.WithStack(err)
-	}
-
-	// wait state change
-	voterNodes, err := waitVoterNodes(ctx, b, StateElecting)
+	nodes, err := waitVoterNodes(ctx, b, StateElecting)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	// no voter = lat node
-	if len(voterNodes) < 1 {
-		b.setState(StateRunning)
-		if err := b.updateNode(); err != nil {
-			return errors.WithStack(err)
-		}
+	if len(nodes) < 1 {
 		return nil
 	}
 
-	if err := leaderElection(ctx, b, voterNodes); err != nil {
-		return errors.WithStack(err)
-	}
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].getULID() < nodes[j].getULID()
+	})
 
-	return nil
-}
-
-func leaderElection(ctx context.Context, b *Bully, voterNodes []internalVoterNode) error {
-	// selects targets smaller than its own NodeNumber
-	selfNodeNumber := b.getNodeNumber()
-	targetNodes := make([]internalVoterNode, 0, len(voterNodes))
-	for _, n := range voterNodes {
-		if selfNodeNumber < n.getNodeNumber() {
-			targetNodes = append(targetNodes, n)
-		}
-	}
-
-	for _, n := range targetNodes {
-		if err := b.sendElection(n.ID()); err != nil {
-			return errors.WithStack(err)
-		}
-	}
-
-	expectNumAnsweredNodes := len(voterNodes) - 1
-	nodes, err := waitNodeStateAnswered(ctx, b, expectNumAnsweredNodes)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	if _, err := syncLeader(ctx, b, nodes); err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
-}
-
-func syncLeader(ctx context.Context, b *Bully, answerNodes []internalVoterNode) (internalVoterNode, error) {
-	leaderNodes := make([]internalVoterNode, 0, 1)
-	for _, n := range answerNodes {
-		if n.getNumElection() == 0 {
-			leaderNodes = append(leaderNodes, n)
-		}
-	}
-
-	// must one node
-	if 1 < len(leaderNodes) {
-		return nil, errors.Wrapf(ErrTooManyLeader, "nodes = %+v", leaderNodes)
-	}
-
-	if len(leaderNodes) == 0 {
-		msg := bytes.NewBuffer(nil)
-		for _, n := range answerNodes {
-			fmt.Fprintf(msg, "id:%s election:%d answer:%d\n", n.ID(), n.getNumElection(), n.getNumAnswer())
-		}
-		return nil, errors.Wrapf(ErrNoLeader, msg.String())
-	}
-
-	leaderNode := leaderNodes[0]
-	if leaderNode.ID() == b.ID() { // leader only
-		for _, n := range answerNodes {
-			if err := b.sendCoordinator(n.ID()); err != nil {
-				return nil, errors.Wrapf(ErrSyncCoordinator, "cause:%+v", err)
+	candidateLeader := nodes[0]
+	if candidateLeader.ID() == b.node.ID() {
+		for _, n := range nodes {
+			if err := b.sendCoordinatorMessage(n.ID()); err != nil {
+				return errors.Wrapf(ErrSyncCoordinator, "case: %+v", errors.WithStack(err))
 			}
 		}
 	}
 
 	if _, err := waitVoterNodes(ctx, b, StateRunning); err != nil {
-		return nil, errors.WithStack(err)
-	}
-
-	return leaderNode, nil
-}
-
-func handleMessage(_ context.Context, b *Bully, msg Message) error {
-	if b.IsVoter() != true {
-		return nil
-	}
-
-	switch msg.Type {
-	case ElectionMessage:
-		if err := b.sendAnswer(msg.NodeID); err != nil {
-			return errors.Wrapf(err, "send answer(%s)", msg.NodeID)
-		}
-		b.incrementElection(1)
-		b.setState(StateAnswered)
-		if err := b.updateNode(); err != nil {
-			return errors.Wrapf(err, "updateNode timeout")
-		}
-
-	case AnswerMessage:
-		b.incrementAnswer(1)
-		if err := b.updateNode(); err != nil {
-			return errors.Wrapf(err, "updateNode timeout")
-		}
-
-	case CoordinatorMessage:
-		b.setLeaderID(msg.NodeID)
-		b.setState(StateRunning)
-		if err := b.updateNode(); err != nil {
-			return errors.Wrapf(err, "updateNode timeout")
-		}
-
-	case TransferLeaderMessage:
-		b.setState(StateTransferLeader)
-		if err := b.updateNode(); err != nil {
-			return errors.Wrapf(err, "updateNode timeout")
-		}
-		select {
-		case b.electionQueue <- struct{}{}:
-			// ok
-		default:
-			log.Printf("warn: election queue already registered")
-		}
+		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func waitNodeStateAnswered(ctx context.Context, b *Bully, expectNum int) ([]internalVoterNode, error) {
-	for {
-		voters := filterVoterNodes(b.Members())
+func (b *Bully) startLeadershipTransfer(ctx context.Context) error {
+	if b.node.IsLeader() != true {
+		return nil
+	}
 
-		num := numState(voters, StateAnswered)
-		if expectNum == num {
-			return voters, nil
-		}
+	nodes, err := waitVoterNodes(ctx, b, StateRunning)
+	if err != nil {
+		return errors.Wrapf(ErrBeginTransferLeadership, "all not running state: %+v", errors.WithStack(err))
+	}
 
-		select {
-		case <-ctx.Done():
-			return nil, errors.WithStack(ErrElectionTimeout)
-		case <-time.After(b.opt.electionInterval):
-			// continue
+	if len(nodes) < 1 {
+		return nil
+	}
+
+	b.setULID(b.opt.ulidGeneratorFunc())
+	if err := b.updateNode(); err != nil {
+		return errors.Wrapf(ErrBeginTransferLeadership, "update ulid: %+v", errors.WithStack(err))
+	}
+
+	for _, n := range nodes {
+		if err := b.sendTransferLeaderMessage(n.ID()); err != nil {
+			return errors.Wrapf(ErrSyncCoordinator, "case: %+v", errors.WithStack(err))
 		}
 	}
+
+	if _, err := waitVoterNodes(ctx, b, StateRunning); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
 }
 
-func waitVoterNodes(ctx context.Context, b *Bully, targetState State) ([]internalVoterNode, error) {
+func waitVoterNodes(ctx context.Context, b *Bully, targetState ElectionState) ([]internalVoterNode, error) {
 	for {
-		voters := filterVoterNodes(b.Members())
+		voters := filterVoterNodes(b.listNodes())
 		if isAllState(voters, targetState) {
 			return voters, nil
 		}
@@ -239,7 +142,7 @@ func waitVoterNodes(ctx context.Context, b *Bully, targetState State) ([]interna
 			msg := bytes.NewBuffer(nil)
 			msg.WriteString("[")
 			for _, n := range voters {
-				fmt.Fprintf(msg, "id:%s election:%d answer:%d,", n.ID(), n.getNumElection(), n.getNumAnswer())
+				fmt.Fprintf(msg, "id:%s state:%s", n.ID(), n.getState())
 			}
 			msg.WriteString("]")
 			return nil, errors.Wrapf(ErrElectionTimeout, msg.String())
@@ -249,23 +152,13 @@ func waitVoterNodes(ctx context.Context, b *Bully, targetState State) ([]interna
 	}
 }
 
-func isAllState(nodes []internalVoterNode, targetState State) bool {
+func isAllState(nodes []internalVoterNode, targetState ElectionState) bool {
 	for _, node := range nodes {
 		if node.getState() != targetState.String() {
 			return false
 		}
 	}
 	return true
-}
-
-func numState(nodes []internalVoterNode, targetState State) int {
-	total := 0
-	for _, node := range nodes {
-		if node.getState() == targetState.String() {
-			total += 1
-		}
-	}
-	return total
 }
 
 func filterVoterNodes(members []Node) []internalVoterNode {

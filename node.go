@@ -34,17 +34,10 @@ type internalVoterNode interface {
 	getState() string
 	setState(string)
 
-	// vote
-	resetVote()
-	incrementElection(uint32)
-	incrementAnswer(uint32)
-	getNumElection() uint32
-	getNumAnswer() uint32
-
 	setLeaderID(string)
 
-	getNodeNumber() int64
-	setNodeNumber(int64)
+	getULID() string
+	setULID(string)
 }
 
 var (
@@ -54,15 +47,13 @@ var (
 
 type nodeMeta struct {
 	ID           string `json:"id"`
+	ULID         string `json:"ulid"`
 	Addr         string `json:"addr"`
 	Port         int    `json:"port"`
 	IsVoter      bool   `json:"isVoter"`
 	State        string `json:"state"`
 	UserMetadata []byte `json:"user-metadata"`
-	NumElection  uint32 `json:"num-election"`
-	NumAnswer    uint32 `json:"num-answer"`
 	LeaderID     string `json:"leader-id"`
-	NodeNumber   int64  `json:"node-number"`
 }
 
 func toJSON(out io.Writer, meta nodeMeta) error {
@@ -87,11 +78,9 @@ func nodeMetaToNode(meta nodeMeta) Node {
 			addr:         meta.Addr,
 			port:         meta.Port,
 			state:        meta.State,
-			numElection:  meta.NumElection,
-			numAnswer:    meta.NumAnswer,
 			leaderID:     meta.LeaderID,
 			userMetadata: meta.UserMetadata,
-			nodeNumber:   meta.NodeNumber,
+			ulid:         meta.ULID,
 		}
 	}
 	return &nonvoterNode{
@@ -104,14 +93,12 @@ func nodeMetaToNode(meta nodeMeta) Node {
 
 type voterNode struct {
 	id           string
+	ulid         string
 	addr         string
 	port         int
 	state        string
-	numElection  uint32
-	numAnswer    uint32
 	leaderID     string
 	userMetadata []byte
-	nodeNumber   int64
 }
 
 func (vn *voterNode) ID() string {
@@ -150,27 +137,6 @@ func (vn *voterNode) setState(newState string) {
 	vn.state = newState
 }
 
-func (vn *voterNode) resetVote() {
-	vn.numElection = 0
-	vn.numAnswer = 0
-}
-
-func (vn *voterNode) incrementElection(n uint32) {
-	vn.numElection += n
-}
-
-func (vn *voterNode) incrementAnswer(n uint32) {
-	vn.numAnswer += n
-}
-
-func (vn *voterNode) getNumElection() uint32 {
-	return vn.numElection
-}
-
-func (vn *voterNode) getNumAnswer() uint32 {
-	return vn.numAnswer
-}
-
 func (vn *voterNode) setLeaderID(id string) {
 	vn.leaderID = id
 }
@@ -179,12 +145,12 @@ func (vn *voterNode) IsLeader() bool {
 	return vn.id == vn.leaderID
 }
 
-func (vn *voterNode) setNodeNumber(num int64) {
-	vn.nodeNumber = num
+func (vn *voterNode) getULID() string {
+	return vn.ulid
 }
 
-func (vn *voterNode) getNodeNumber() int64 {
-	return vn.nodeNumber
+func (vn *voterNode) setULID(ulid string) {
+	vn.ulid = ulid
 }
 
 func (vn *voterNode) toJSON(out io.Writer) error {
@@ -195,20 +161,19 @@ func (vn *voterNode) toJSON(out io.Writer) error {
 		IsVoter:      true,
 		State:        vn.state,
 		UserMetadata: vn.userMetadata,
-		NumElection:  vn.numElection,
-		NumAnswer:    vn.numAnswer,
 		LeaderID:     vn.leaderID,
-		NodeNumber:   vn.nodeNumber,
+		ULID:         vn.ulid,
 	})
 }
 
-func newVoterNode(id string, addr string, port int, state string, nodeNum int64) *voterNode {
+func newVoterNode(id string, ulid string, addr string, port int, state string) *voterNode {
 	return &voterNode{
-		id:         id,
-		addr:       addr,
-		port:       port,
-		state:      state,
-		nodeNumber: nodeNum,
+		id:       id,
+		ulid:     ulid,
+		addr:     addr,
+		port:     port,
+		state:    state,
+		leaderID: id, // initial self
 	}
 }
 
@@ -218,6 +183,7 @@ var (
 
 type nonvoterNode struct {
 	id           string
+	ulid         string
 	addr         string
 	port         int
 	userMetadata []byte
@@ -258,18 +224,19 @@ func (nn *nonvoterNode) setUserMetadata(data []byte) {
 func (nn *nonvoterNode) toJSON(out io.Writer) error {
 	return toJSON(out, nodeMeta{
 		ID:           nn.id,
+		ULID:         nn.ulid,
 		Addr:         nn.addr,
 		Port:         nn.port,
 		IsVoter:      false,
 		State:        "",
 		UserMetadata: nn.userMetadata,
-		NodeNumber:   -1,
 	})
 }
 
-func newNonvoterNode(id string, addr string, port int) *nonvoterNode {
+func newNonvoterNode(id string, ulid string, addr string, port int) *nonvoterNode {
 	return &nonvoterNode{
 		id:   id,
+		ulid: ulid,
 		addr: addr,
 		port: port,
 	}

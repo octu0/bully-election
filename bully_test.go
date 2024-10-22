@@ -135,6 +135,7 @@ func TestCreateVoter(t *testing.T) {
 		if b1.IsLeader() != true {
 			tt.Errorf("leader = b1: %+v", b1.node)
 		}
+
 		if b2.IsLeader() {
 			tt.Errorf("leader = b1: %+v", b2.node)
 		}

@@ -33,10 +33,8 @@ func TestNodeMeta(t *testing.T) {
 			IsVoter:      true,
 			State:        "teststate",
 			UserMetadata: []byte("testusermetadata"),
-			NumElection:  123,
-			NumAnswer:    456,
 			LeaderID:     "testid",
-			NodeNumber:   7890,
+			ULID:         "7890",
 		})
 		if node.ID() != "testid" {
 			tt.Errorf("ID")
@@ -57,14 +55,8 @@ func TestNodeMeta(t *testing.T) {
 		if vn.getState() != "teststate" {
 			tt.Errorf("State")
 		}
-		if vn.getNumElection() != 123 {
-			tt.Errorf("getNumElection")
-		}
-		if vn.getNumAnswer() != 456 {
-			tt.Errorf("getNumAnswer")
-		}
-		if vn.getNodeNumber() != 7890 {
-			tt.Errorf("getNodeNumber")
+		if vn.getULID() != "7890" {
+			tt.Errorf("getULID")
 		}
 	})
 	t.Run("metaToNode/partial", func(tt *testing.T) {
@@ -93,13 +85,7 @@ func TestNodeMeta(t *testing.T) {
 		if vn.getState() != "teststate" {
 			tt.Errorf("State")
 		}
-		if vn.getNumElection() != 0 {
-			tt.Errorf("initial value")
-		}
-		if vn.getNumAnswer() != 0 {
-			tt.Errorf("initial value")
-		}
-		if vn.getNodeNumber() != 0 {
+		if vn.getULID() != "" {
 			tt.Errorf("initial value")
 		}
 	})
