@@ -18,12 +18,15 @@ import (
 )
 
 const (
-	DefaultElectionTimeout       = 10 * time.Second
-	DefaultElectionInterval      = 1 * time.Millisecond
-	DefaultUpdateNodeTimeout     = 5 * time.Second
-	DefaultJoinNodeTimeout       = 10 * time.Second
-	DefaultLeaveNodeTimeout      = 10 * time.Second
-	DefaultTransferLeaderTimeout = 10 * time.Second
+	DefaultElectionTimeout         = 10 * time.Second
+	DefaultElectionInterval        = 1 * time.Millisecond
+	DefaultUpdateNodeTimeout       = 5 * time.Second
+	DefaultJoinNodeTimeout         = 10 * time.Second
+	DefaultLeaveNodeTimeout        = 10 * time.Second
+	DefaultTransferLeaderTimeout   = 10 * time.Second
+	DefaultRetryNodeMsgTimeout     = 15 * time.Second
+	DefaultRetryNodeEventTimeout   = 15 * time.Second
+	DefaultRetryNodeEventsInterval = 100 * time.Millisecond
 )
 
 var (
@@ -108,6 +111,8 @@ type bullyOpt struct {
 	joinNodeTimeout       time.Duration
 	leaveNodeTimeout      time.Duration
 	transferLeaderTimeout time.Duration
+	retryNodeMsgTimeout   time.Duration
+	retryNodeEventTimeout time.Duration
 	ulidGeneratorFunc     ULIDGeneratorFunc
 	onErrorFunc           OnErrorFunc
 	logger                *log.Logger
@@ -155,6 +160,18 @@ func WithTransferLeaderTimeout(d time.Duration) BullyOptFunc {
 	}
 }
 
+func WithRetryNodeMsgTimeout(d time.Duration) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.retryNodeMsgTimeout = d
+	}
+}
+
+func WithRetryNodeEventTimeout(d time.Duration) BullyOptFunc {
+	return func(o *bullyOpt) {
+		o.retryNodeEventTimeout = d
+	}
+}
+
 func WithULIDGeneratorFunc(f ULIDGeneratorFunc) BullyOptFunc {
 	return func(o *bullyOpt) {
 		o.ulidGeneratorFunc = f
@@ -175,6 +192,8 @@ func newBullyOpt(opts []BullyOptFunc) *bullyOpt {
 		joinNodeTimeout:       DefaultJoinNodeTimeout,
 		leaveNodeTimeout:      DefaultLeaveNodeTimeout,
 		transferLeaderTimeout: DefaultTransferLeaderTimeout,
+		retryNodeMsgTimeout:   DefaultRetryNodeMsgTimeout,
+		retryNodeEventTimeout: DefaultRetryNodeEventTimeout,
 		observeFunc:           DefaultObserverFunc,
 		ulidGeneratorFunc:     DefaultULIDGeneratorFunc,
 		onErrorFunc:           DefaultOnErrorFunc,
@@ -451,7 +470,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 				select {
 				case evtCh <- evtMsg:
 					// ok
-				default:
+				case <-time.After(b.opt.retryNodeEventTimeout):
 					b.opt.logger.Printf("warn: evtCh maybe hangup(transfer_leadership), drop msg: %+v", msg)
 				}
 			}
@@ -603,7 +622,7 @@ func (d *hookNodeMessage) NotifyMsg(msg []byte) {
 	select {
 	case d.msgCh <- msg:
 		// ok
-	default:
+	case <-time.After(d.opt.retryNodeMsgTimeout):
 		d.opt.logger.Printf("warn: msgCh maybe hangup, drop msg: %s", msg)
 	}
 }
@@ -636,7 +655,7 @@ func (e *hookNodeEvent) NotifyJoin(node *memberlist.Node) {
 	select {
 	case e.evtCh <- msg:
 		// ok
-	default:
+	case <-time.After(e.opt.retryNodeEventTimeout):
 		e.opt.logger.Printf("warn: evtCh maybe hangup(join), drop msg: %+v", msg)
 	}
 }
@@ -651,7 +670,7 @@ func (e *hookNodeEvent) NotifyLeave(node *memberlist.Node) {
 	select {
 	case e.evtCh <- msg:
 		// ok
-	default:
+	case <-time.After(e.opt.retryNodeEventTimeout):
 		e.opt.logger.Printf("warn: evtCh maybe hangup(leave), drop msg: %+v", msg)
 	}
 }
