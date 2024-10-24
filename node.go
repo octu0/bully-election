@@ -35,11 +35,13 @@ type internalVoterNode interface {
 	setState(string)
 
 	setLeaderID(string)
+	getLeaderID() string
 
 	getULID() string
 	setULID(string)
 }
 
+// impl check
 var (
 	_ Node              = (*voterNode)(nil)
 	_ internalVoterNode = (*voterNode)(nil)
@@ -121,10 +123,6 @@ func (vn *voterNode) IsVoter() bool {
 	return true
 }
 
-func (vn *voterNode) getState() string {
-	return vn.state
-}
-
 func (vn *voterNode) UserMetadata() []byte {
 	return vn.userMetadata
 }
@@ -133,8 +131,16 @@ func (vn *voterNode) setUserMetadata(data []byte) {
 	vn.userMetadata = data
 }
 
+func (vn *voterNode) getState() string {
+	return vn.state
+}
+
 func (vn *voterNode) setState(newState string) {
 	vn.state = newState
+}
+
+func (vn *voterNode) getLeaderID() string {
+	return vn.leaderID
 }
 
 func (vn *voterNode) setLeaderID(id string) {
@@ -177,6 +183,7 @@ func newVoterNode(id string, ulid string, addr string, port int, state string) *
 	}
 }
 
+// impl check
 var (
 	_ Node = (*nonvoterNode)(nil)
 )

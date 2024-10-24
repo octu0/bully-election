@@ -5,7 +5,7 @@ import (
 )
 
 func TestUtilFunc(t *testing.T) {
-	numState := func(nodes []internalVoterNode, targetState ElectionState) int {
+	numState := func(nodes []internalVoterNode, targetState electionState) int {
 		total := 0
 		for _, n := range nodes {
 			if n.getState() == targetState.String() {
@@ -16,44 +16,44 @@ func TestUtilFunc(t *testing.T) {
 	}
 	t.Run("isAllState", func(tt *testing.T) {
 		nodes1 := []internalVoterNode{
-			&voterNode{id: "1", state: StateRunning.String()},
-			&voterNode{id: "2", state: StateRunning.String()},
-			&voterNode{id: "3", state: StateElecting.String()},
+			&voterNode{id: "1", state: stateRunning.String()},
+			&voterNode{id: "2", state: stateRunning.String()},
+			&voterNode{id: "3", state: stateElecting.String()},
 		}
-		if isAllState(nodes1, StateElecting) {
+		if isAllState(nodes1, stateElecting) {
 			tt.Errorf("two running, one electing")
 		}
 		nodes2 := []internalVoterNode{
-			&voterNode{id: "1", state: StateElecting.String()},
-			&voterNode{id: "2", state: StateElecting.String()},
-			&voterNode{id: "3", state: StateElecting.String()},
+			&voterNode{id: "1", state: stateElecting.String()},
+			&voterNode{id: "2", state: stateElecting.String()},
+			&voterNode{id: "3", state: stateElecting.String()},
 		}
-		if isAllState(nodes2, StateElecting) != true {
+		if isAllState(nodes2, stateElecting) != true {
 			tt.Errorf("all electing")
 		}
 	})
 	t.Run("numState", func(tt *testing.T) {
 		nodes1 := []internalVoterNode{
-			&voterNode{id: "1", state: StateRunning.String()},
-			&voterNode{id: "2", state: StateRunning.String()},
-			&voterNode{id: "3", state: StateElecting.String()},
+			&voterNode{id: "1", state: stateRunning.String()},
+			&voterNode{id: "2", state: stateRunning.String()},
+			&voterNode{id: "3", state: stateElecting.String()},
 		}
-		if numState(nodes1, StateRunning) != 2 {
+		if numState(nodes1, stateRunning) != 2 {
 			tt.Errorf("numState")
 		}
-		if numState(nodes1, StateElecting) != 1 {
+		if numState(nodes1, stateElecting) != 1 {
 			tt.Errorf("numState")
 		}
 
 		nodes2 := []internalVoterNode{
-			&voterNode{id: "1", state: StateElecting.String()},
-			&voterNode{id: "2", state: StateElecting.String()},
-			&voterNode{id: "3", state: StateElecting.String()},
+			&voterNode{id: "1", state: stateElecting.String()},
+			&voterNode{id: "2", state: stateElecting.String()},
+			&voterNode{id: "3", state: stateElecting.String()},
 		}
-		if numState(nodes2, StateRunning) != 0 {
+		if numState(nodes2, stateRunning) != 0 {
 			tt.Errorf("numState")
 		}
-		if numState(nodes2, StateElecting) != 3 {
+		if numState(nodes2, stateElecting) != 3 {
 			tt.Errorf("numState")
 		}
 	})

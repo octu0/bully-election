@@ -28,27 +28,89 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 		}
 	}()
 
+	if b.node.IsVoter() != true {
+		b.opt.logger.Printf("debug: is not voter, skip election")
+		return nil
+	}
+
 	b.opt.logger.Printf("debug: start election")
 	defer b.opt.logger.Printf("debug: end election")
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.node.IsVoter() != true {
-		return nil
+	if err := b.syncState(stateWaitElection); err != nil {
+		return errors.Wrapf(err, "state change : %s", stateElecting)
 	}
-
-	nodes, err := waitVoterNodes(ctx, b, StateElecting)
+	nodes, err := waitVoterNodes(ctx, b, stateWaitElection)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	// TODO: sync other nodes
-	<-time.After(b.opt.workaroundStepInterval)
+	for _, n := range nodes {
+		b.opt.logger.Printf("debug: current node %s is_leader=%v", n.ID(), n.IsLeader())
+	}
 
-	if len(nodes) < 1 {
+	if len(nodes) < 2 {
+		b.setLeaderID(b.node.ID())
+		if err := b.updateNode(); err != nil {
+			return errors.Wrapf(err, "promote self to leader timeout: %+v", err)
+		}
 		return nil
 	}
+
+	isNoLeader := true
+	for _, n := range nodes {
+		if n.IsLeader() {
+			isNoLeader = false
+		}
+	}
+	if isNoLeader {
+		sort.Slice(nodes, func(i, j int) bool {
+			return nodes[i].getULID() < nodes[j].getULID()
+		})
+		temporaryLeaderID := nodes[0].ID()
+		if temporaryLeaderID == b.node.ID() { // self
+			b.setLeaderID(temporaryLeaderID)
+		}
+	}
+
+	if b.node.IsLeader() {
+		b.opt.logger.Printf("debug: leader synchronization")
+
+		b.opt.logger.Printf("debug: leader wait follower ready msg: num=%d", len(nodes)-1)
+		expectCollected := len(nodes) - 1 // without leader
+		if err := waitCollected(ctx, b, expectCollected); err != nil {
+			return errors.Wrapf(ErrElectionTimeout, "ready election timeout: %+v", errors.WithStack(err))
+		}
+
+		for _, n := range nodes {
+			if err := b.sendReadySyncedMessage(n.ID()); err != nil {
+				return errors.Wrapf(ErrElectionTimeout, "send ready synced: %+v", err)
+			}
+		}
+
+		if err := b.syncState(stateElecting); err != nil {
+			return errors.Wrapf(ErrElectionTimeout, "state change : %s", stateElecting)
+		}
+	} else {
+		b.opt.logger.Printf("debug: follower synchronization")
+
+		b.opt.logger.Printf("debug: follower send ready msg: num=%d", len(nodes)-1) // -1 = self
+		for _, n := range nodes {
+			b.opt.logger.Printf("debug: follower send ready to %s", n.ID())
+			if err := b.sendReadyElectionMessage(n.ID()); err != nil {
+				return errors.Wrapf(ErrSyncCoordinator, "case: %+v", errors.WithStack(err))
+			}
+		}
+
+		b.opt.logger.Printf("debug: follower wait other node ready synched -> electing: %d", len(nodes))
+		if _, err := waitVoterNodes(ctx, b, stateElecting); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+
+	b.opt.logger.Printf("debug: nodes synchronized")
 
 	sort.Slice(nodes, func(i, j int) bool {
 		return nodes[i].getULID() < nodes[j].getULID()
@@ -63,10 +125,7 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 		}
 	}
 
-	// TODO: sync other nodes
-	<-time.After(b.opt.workaroundStepInterval)
-
-	if _, err := waitVoterNodes(ctx, b, StateRunning); err != nil {
+	if _, err := waitVoterNodes(ctx, b, stateRunning); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -78,7 +137,7 @@ func (b *Bully) startLeadershipTransfer(ctx context.Context) error {
 		return nil
 	}
 
-	nodes, err := waitVoterNodes(ctx, b, StateRunning)
+	nodes, err := waitVoterNodes(ctx, b, stateRunning)
 	if err != nil {
 		return errors.Wrapf(ErrBeginTransferLeadership, "all not running state: %+v", errors.WithStack(err))
 	}
@@ -98,13 +157,36 @@ func (b *Bully) startLeadershipTransfer(ctx context.Context) error {
 		}
 	}
 
-	if _, err := waitVoterNodes(ctx, b, StateRunning); err != nil {
+	if _, err := waitVoterNodes(ctx, b, stateRunning); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func waitVoterNodes(ctx context.Context, b *Bully, targetState ElectionState) ([]internalVoterNode, error) {
+func waitCollected(ctx context.Context, b *Bully, expectCollected int) error {
+	for {
+		ch := make(chan int)
+		b.recvReadyCount <- &recvReadyElectionCount{ch}
+
+		select {
+		case <-ctx.Done():
+			return errors.WithStack(ErrSyncCoordinator)
+		case count := <-ch:
+			if expectCollected <= count {
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return errors.WithStack(ctx.Err())
+		case <-time.After(b.opt.electionInterval):
+			// continue
+		}
+	}
+}
+
+func waitVoterNodes(ctx context.Context, b *Bully, targetState electionState) ([]internalVoterNode, error) {
 	for {
 		voters := filterVoterNodes(b.listNodes())
 		if isAllState(voters, targetState) {
@@ -126,7 +208,7 @@ func waitVoterNodes(ctx context.Context, b *Bully, targetState ElectionState) ([
 	}
 }
 
-func isAllState(nodes []internalVoterNode, targetState ElectionState) bool {
+func isAllState(nodes []internalVoterNode, targetState electionState) bool {
 	for _, node := range nodes {
 		if node.getState() != targetState.String() {
 			return false

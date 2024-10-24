@@ -64,7 +64,9 @@ var (
 )
 
 type nodeEventMsg struct {
-	evt NodeEvent
+	evt  NodeEvent
+	id   string
+	addr string
 }
 
 type observeNodeEvent struct {
@@ -79,7 +81,7 @@ func (e *observeNodeEvent) NotifyJoin(node *memberlist.Node) {
 	}
 
 	e.opt.logger.Printf("info: join event: name=%s addr=%s", node.Name, node.Address())
-	msg := &nodeEventMsg{JoinEvent}
+	msg := &nodeEventMsg{JoinEvent, node.Name, node.Address()}
 	select {
 	case e.evtCh <- msg:
 		// ok
@@ -94,7 +96,7 @@ func (e *observeNodeEvent) NotifyLeave(node *memberlist.Node) {
 	}
 
 	e.opt.logger.Printf("info: leave event: name=%s addr=%s", node.Name, node.Address())
-	msg := &nodeEventMsg{LeaveEvent}
+	msg := &nodeEventMsg{LeaveEvent, node.Name, node.Address()}
 	select {
 	case e.evtCh <- msg:
 		// ok
