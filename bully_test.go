@@ -22,8 +22,8 @@ func TestCreateVoter(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		b, err := CreateVoter(ctx, conf,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("on error=%+v", err)
@@ -79,8 +79,8 @@ func TestCreateVoter(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		b1, err := CreateVoter(ctx, conf1,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[1] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[1] on error=%+v", err)
@@ -93,8 +93,8 @@ func TestCreateVoter(t *testing.T) {
 
 		b2, err := CreateVoter(ctx, conf2,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[2] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[2] on error=%+v", err)
@@ -178,8 +178,8 @@ func TestCreateNonVoter(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		b1, err := CreateVoter(ctx, conf1,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[1] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[1] on error=%+v", err)
@@ -192,8 +192,8 @@ func TestCreateNonVoter(t *testing.T) {
 
 		b2, err := CreateNonVoter(ctx, conf2,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[2] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[2] on error=%+v", err)
@@ -250,8 +250,8 @@ func TestCreateNonVoter(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		b1, err := CreateVoter(ctx, conf1,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[1] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[1] on error=%+v", err)
@@ -264,8 +264,8 @@ func TestCreateNonVoter(t *testing.T) {
 
 		b2, err := CreateVoter(ctx, conf2,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[2] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[2] on error=%+v", err)
@@ -278,8 +278,8 @@ func TestCreateNonVoter(t *testing.T) {
 
 		b3, err := CreateNonVoter(ctx, conf3,
 			WithElectionTimeout(1*time.Second),
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[3] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[3] on error=%+v", err)
@@ -339,8 +339,8 @@ func TestCreateNonVoter(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		b1, err := CreateVoter(ctx, conf1,
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[1] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[1] on error=%+v", err)
@@ -353,8 +353,8 @@ func TestCreateNonVoter(t *testing.T) {
 		tt.Logf("[1] addr=%s", b1.Address())
 
 		b2, err := CreateVoter(ctx, conf2,
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[2] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[2] on error=%+v", err)
@@ -367,8 +367,8 @@ func TestCreateNonVoter(t *testing.T) {
 		tt.Logf("[2] addr=%s", b2.Address())
 
 		b3, err := CreateNonVoter(ctx, conf3,
-			WithObserveFunc(func(b *Bully, evt NodeEvent) {
-				tt.Logf("[3] evt=%s", evt)
+			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
 				tt.Fatalf("[3] on error=%+v", err)
@@ -453,8 +453,8 @@ func TestMetadata(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	b1, err := CreateVoter(ctx, conf1,
 		WithElectionTimeout(1*time.Second),
-		WithObserveFunc(func(b *Bully, evt NodeEvent) {
-			t.Logf("[1] evt=%s", evt)
+		WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+			tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 		}),
 		WithOnErrorFunc(func(err error) {
 			t.Fatalf("[1] on error=%+v", err)
@@ -467,8 +467,8 @@ func TestMetadata(t *testing.T) {
 
 	b2, err := CreateVoter(ctx, conf2,
 		WithElectionTimeout(1*time.Second),
-		WithObserveFunc(func(b *Bully, evt NodeEvent) {
-			t.Logf("[2] evt=%s", evt)
+		WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+			tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 		}),
 		WithOnErrorFunc(func(err error) {
 			t.Fatalf("[2] on error=%+v", err)

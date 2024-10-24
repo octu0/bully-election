@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hashicorp/memberlist"
 	bullyelection "github.com/octu0/bully-election"
@@ -26,27 +27,28 @@ func main() {
 	conf.BindPort = *port
 	conf.AdvertiseAddr = conf.BindAddr
 	conf.AdvertisePort = conf.BindPort
-	conf.EnableCompression = false
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	sig, sigStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	sig, sigStop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer sigStop()
 
-	b, err := bullyelection.CreateVoter(ctx, conf, bullyelection.WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent) {
-		log.Printf("[%s] event: %s", b.ID(), evt.String())
+	b, err := bullyelection.CreateVoter(ctx, conf, bullyelection.WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent, id, addr string) {
+		log.Printf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
+		for _, n := range b.Members() {
+			log.Printf("%s is_leader=%v", n.ID(), n.IsLeader())
+		}
 	}))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Println("startup")
-
 	log.Printf("join: %s", *join)
 	if err := b.Join(*join); err != nil {
 		log.Fatal(err)
 	}
+	log.Printf("joined")
 
 	<-sig.Done()
 
