@@ -156,7 +156,7 @@ func (vn *voterNode) toJSON(out io.Writer) error {
 	})
 }
 
-func newVoterNode(id string, ulid string, addr string, port int, state string) *voterNode {
+func newVoterNode(id string, ulid string, addr string, port int) *voterNode {
 	return &voterNode{
 		id:       id,
 		ulid:     ulid,

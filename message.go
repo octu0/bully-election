@@ -113,7 +113,6 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 			switch msg.Type {
 			case ElectionMessage:
 				b.opt.logger.Printf("info: election message: %s", msg.NodeID)
-				b.stm.AddElected(msg.NodeID)
 				if err := b.sendAnswerMessage(msg.NodeID); err != nil {
 					// It will automatically reply, so there may be cases where it tries to send to a NodeID
 					// that is not yet included in Members(), and it is ok to ignore it.
@@ -137,13 +136,11 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 
 			case CoordinatorMessage:
 				b.opt.logger.Printf("info: coordinator message: %s", msg.NodeID)
-				b.stm.SetLeaderID(msg.NodeID)
 				b.setLeaderID(msg.NodeID)
 				if err := b.updateNode(); err != nil {
 					b.opt.onErrorFunc(errors.Wrapf(err, "update leader(%s)", msg.NodeID))
 					continue
 				}
-				b.stm.Reset()
 				dumpNodes()
 
 				evtMsg := &nodeEventMsg{ElectionEvent, msg.NodeID, msg.NodeAddr}

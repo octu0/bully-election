@@ -177,7 +177,6 @@ type Bully struct {
 	electionQueue  chan *nodeEventMsg
 	waitElection   chan error
 	electionCancel context.CancelFunc
-	stm            *stateMachine
 	opt            *bullyOpt
 	cancel         context.CancelFunc
 	node           Node
@@ -441,7 +440,6 @@ func newBully(opt *bullyOpt, node Node, list *memberlist.Memberlist, cancel cont
 		electionQueue:  make(chan *nodeEventMsg, 1024),
 		waitElection:   nil,
 		electionCancel: nopCancelFunc(),
-		stm:            newStateMachine(),
 		opt:            opt,
 		node:           node,
 		list:           list,
@@ -502,7 +500,7 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 
 func CreateVoter(parent context.Context, conf *memberlist.Config, funcs ...BullyOptFunc) (*Bully, error) {
 	return createBully(parent, conf, funcs, func(ulid string) Node {
-		return newVoterNode(conf.Name, ulid, conf.AdvertiseAddr, conf.AdvertisePort, stateInitial.String())
+		return newVoterNode(conf.Name, ulid, conf.AdvertiseAddr, conf.AdvertisePort)
 	})
 }
 
