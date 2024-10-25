@@ -36,8 +36,10 @@ func main() {
 
 	b, err := bullyelection.CreateVoter(ctx, conf, bullyelection.WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent, id, addr string) {
 		log.Printf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
-		for _, n := range b.Members() {
-			log.Printf("%s is_leader=%v", n.ID(), n.IsLeader())
+		if evt == bullyelection.ElectionEvent {
+			for _, n := range b.Members() {
+				log.Printf("%s is_leader=%v", n.ID(), n.IsLeader())
+			}
 		}
 	}))
 	if err != nil {

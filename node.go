@@ -30,10 +30,6 @@ type Node interface {
 type internalVoterNode interface {
 	Node
 
-	// state
-	getState() string
-	setState(string)
-
 	setLeaderID(string)
 	getLeaderID() string
 
@@ -53,7 +49,6 @@ type nodeMeta struct {
 	Addr         string `json:"addr"`
 	Port         int    `json:"port"`
 	IsVoter      bool   `json:"isVoter"`
-	State        string `json:"state"`
 	UserMetadata []byte `json:"user-metadata"`
 	LeaderID     string `json:"leader-id"`
 }
@@ -79,7 +74,6 @@ func nodeMetaToNode(meta nodeMeta) Node {
 			id:           meta.ID,
 			addr:         meta.Addr,
 			port:         meta.Port,
-			state:        meta.State,
 			leaderID:     meta.LeaderID,
 			userMetadata: meta.UserMetadata,
 			ulid:         meta.ULID,
@@ -98,7 +92,6 @@ type voterNode struct {
 	ulid         string
 	addr         string
 	port         int
-	state        string
 	leaderID     string
 	userMetadata []byte
 }
@@ -131,14 +124,6 @@ func (vn *voterNode) setUserMetadata(data []byte) {
 	vn.userMetadata = data
 }
 
-func (vn *voterNode) getState() string {
-	return vn.state
-}
-
-func (vn *voterNode) setState(newState string) {
-	vn.state = newState
-}
-
 func (vn *voterNode) getLeaderID() string {
 	return vn.leaderID
 }
@@ -165,7 +150,6 @@ func (vn *voterNode) toJSON(out io.Writer) error {
 		Addr:         vn.addr,
 		Port:         vn.port,
 		IsVoter:      true,
-		State:        vn.state,
 		UserMetadata: vn.userMetadata,
 		LeaderID:     vn.leaderID,
 		ULID:         vn.ulid,
@@ -178,7 +162,6 @@ func newVoterNode(id string, ulid string, addr string, port int, state string) *
 		ulid:     ulid,
 		addr:     addr,
 		port:     port,
-		state:    state,
 		leaderID: id, // initial self
 	}
 }
@@ -235,7 +218,6 @@ func (nn *nonvoterNode) toJSON(out io.Writer) error {
 		Addr:         nn.addr,
 		Port:         nn.port,
 		IsVoter:      false,
-		State:        "",
 		UserMetadata: nn.userMetadata,
 	})
 }

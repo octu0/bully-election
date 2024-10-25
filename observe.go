@@ -2,6 +2,7 @@ package bullyelection
 
 import (
 	"bytes"
+	"context"
 	"time"
 
 	"github.com/hashicorp/memberlist"
@@ -13,6 +14,7 @@ var (
 )
 
 type observeNodeMessage struct {
+	ctx   context.Context
 	opt   *bullyOpt
 	ready *atomicReadyStatus
 	msgCh chan []byte
@@ -48,6 +50,9 @@ func (d *observeNodeMessage) NotifyMsg(msg []byte) {
 	}
 
 	select {
+	case <-d.ctx.Done():
+		return
+
 	case d.msgCh <- msg:
 		// ok
 	case <-time.After(d.opt.retryNodeMsgTimeout):
@@ -55,8 +60,8 @@ func (d *observeNodeMessage) NotifyMsg(msg []byte) {
 	}
 }
 
-func newObserveNodeMessage(opt *bullyOpt, ready *atomicReadyStatus, ch chan []byte, node Node) *observeNodeMessage {
-	return &observeNodeMessage{opt, ready, ch, node}
+func newObserveNodeMessage(ctx context.Context, opt *bullyOpt, ready *atomicReadyStatus, ch chan []byte, node Node) *observeNodeMessage {
+	return &observeNodeMessage{ctx, opt, ready, ch, node}
 }
 
 var (
@@ -70,6 +75,7 @@ type nodeEventMsg struct {
 }
 
 type observeNodeEvent struct {
+	ctx   context.Context
 	opt   *bullyOpt
 	ready *atomicReadyStatus
 	evtCh chan *nodeEventMsg
@@ -83,6 +89,9 @@ func (e *observeNodeEvent) NotifyJoin(node *memberlist.Node) {
 	e.opt.logger.Printf("info: join event: name=%s addr=%s", node.Name, node.Address())
 	msg := &nodeEventMsg{JoinEvent, node.Name, node.Address()}
 	select {
+	case <-e.ctx.Done():
+		return
+
 	case e.evtCh <- msg:
 		// ok
 	case <-time.After(e.opt.retryNodeEventTimeout):
@@ -98,6 +107,9 @@ func (e *observeNodeEvent) NotifyLeave(node *memberlist.Node) {
 	e.opt.logger.Printf("info: leave event: name=%s addr=%s", node.Name, node.Address())
 	msg := &nodeEventMsg{LeaveEvent, node.Name, node.Address()}
 	select {
+	case <-e.ctx.Done():
+		return
+
 	case e.evtCh <- msg:
 		// ok
 	case <-time.After(e.opt.retryNodeEventTimeout):
@@ -109,6 +121,6 @@ func (e *observeNodeEvent) NotifyUpdate(node *memberlist.Node) {
 	// nop
 }
 
-func newObserveNodeEvent(opt *bullyOpt, ready *atomicReadyStatus, ch chan *nodeEventMsg) *observeNodeEvent {
-	return &observeNodeEvent{opt, ready, ch}
+func newObserveNodeEvent(ctx context.Context, opt *bullyOpt, ready *atomicReadyStatus, ch chan *nodeEventMsg) *observeNodeEvent {
+	return &observeNodeEvent{ctx, opt, ready, ch}
 }
