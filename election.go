@@ -12,7 +12,11 @@ var (
 	ErrTransferLeadership = errors.New("failed  to transfer_leadership")
 )
 
-func (b *Bully) startElection(ctx context.Context) (err error) {
+func (b *Bully) startElection(ctx context.Context, event NodeEvent, nodeID string) (err error) {
+	if b.node.IsVoter() != true {
+		b.opt.logger.Printf("debug: is not voter, skip election")
+		return nil
+	}
 	defer func() {
 		if b.waitElection != nil {
 			select {
@@ -24,9 +28,10 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 		}
 	}()
 
-	if b.node.IsVoter() != true {
-		b.opt.logger.Printf("debug: is not voter, skip election")
-		return nil
+	if event == JoinEvent {
+		if b.checkVoterNode(nodeID) != true {
+			return nil // skip nonvoter join
+		}
 	}
 
 	b.opt.logger.Printf("debug: start election")
@@ -38,10 +43,18 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 	b.electionCancel()
 	b.electionCancel = nopCancelFunc()
 
-	nodes := getVoters(b)
+	voterNodes := getVoters(b)
+	if len(voterNodes) < 2 { // promote self
+		for _, n := range b.listNodes() {
+			if err := b.sendCoordinatorMessage(n.ID()); err != nil {
+				b.opt.onErrorFunc(errors.Wrapf(ErrElection, "send coordinator: %+v", err))
+			}
+		}
+		return nil
+	}
 
 	selfULID := b.getULID()
-	for _, n := range nodes {
+	for _, n := range voterNodes {
 		// electable = smaller than own ULID
 		if n.getULID() < selfULID {
 			if err := b.sendElectionMessage(n.ID()); err != nil {
@@ -56,7 +69,8 @@ func (b *Bully) startElection(ctx context.Context) (err error) {
 			return
 
 		case <-time.After(b.opt.electionTimeout):
-			for _, n := range nodes {
+			// send all nodes
+			for _, n := range b.listNodes() {
 				if err := b.sendCoordinatorMessage(n.ID()); err != nil {
 					b.opt.onErrorFunc(errors.Wrapf(ErrElection, "send coordinator: %+v", err))
 				}

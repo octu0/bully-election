@@ -44,9 +44,11 @@ func main() {
 		WithElectionTimeout(1*time.Second),
 		WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent, id, addr string) {
 			log.Printf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
+			if evt == bullyelection.ElectionEvent {
 			for _, n := range b.Members() {
 				log.Printf("%s is_leader=%v", n.ID(), n.IsLeader())
 			}
+		}
 		}),
 		WithOnErrorFunc(func(err error) {
 			log.Printf("error=%+v", err)

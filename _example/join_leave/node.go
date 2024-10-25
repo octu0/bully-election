@@ -14,10 +14,11 @@ import (
 
 func main() {
 	var (
-		id   = flag.String("id", "node1", "node id")
-		addr = flag.String("addr", "127.0.0.1", "ip addr")
-		port = flag.Int("port", 7234, "port")
-		join = flag.String("join", "127.0.0.1:7234", "join addr")
+		id         = flag.String("id", "node1", "node id")
+		addr       = flag.String("addr", "127.0.0.1", "ip addr")
+		port       = flag.Int("port", 7234, "port")
+		join       = flag.String("join", "127.0.0.1:7234", "join addr")
+		isNonVoter = flag.Bool("nonvoter", false, "nonvoter mode")
 	)
 	flag.Parse()
 
@@ -34,14 +35,22 @@ func main() {
 	sig, sigStop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer sigStop()
 
-	b, err := bullyelection.CreateVoter(ctx, conf, bullyelection.WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent, id, addr string) {
-		log.Printf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
-		if evt == bullyelection.ElectionEvent {
-			for _, n := range b.Members() {
-				log.Printf("%s is_leader=%v", n.ID(), n.IsLeader())
+	opts := []bullyelection.BullyOptFunc{
+		bullyelection.WithObserveFunc(func(b *bullyelection.Bully, evt bullyelection.NodeEvent, id, addr string) {
+			log.Printf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
+			if evt == bullyelection.ElectionEvent {
+				for _, n := range b.Members() {
+					log.Printf("%s is_leader=%v", n.ID(), n.IsLeader())
+				}
 			}
+		}),
+	}
+	b, err := func() (*bullyelection.Bully, error) {
+		if *isNonVoter {
+			return bullyelection.CreateNonVoter(ctx, conf, opts...)
 		}
-	}))
+		return bullyelection.CreateVoter(ctx, conf, opts...)
+	}()
 	if err != nil {
 		log.Fatal(err)
 	}

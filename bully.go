@@ -37,29 +37,6 @@ var (
 	ErrNodeNotFound              = errors.New("node not found")
 )
 
-type NodeEvent uint8
-
-const (
-	JoinEvent NodeEvent = iota + 1
-	LeaveEvent
-	TransferLeadershipEvent
-	ElectionEvent
-)
-
-func (evt NodeEvent) String() string {
-	switch evt {
-	case JoinEvent:
-		return "join"
-	case LeaveEvent:
-		return "leave"
-	case TransferLeadershipEvent:
-		return "transfer_leadership"
-	case ElectionEvent:
-		return "election"
-	}
-	return "unknown event"
-}
-
 type (
 	ObserveFunc       func(*Bully, NodeEvent, string, string)
 	ULIDGeneratorFunc func() string
@@ -276,16 +253,23 @@ func (b *Bully) listNodes() []Node {
 	return m
 }
 
-func (b *Bully) Join(addr string) (err error) {
+func (b *Bully) followerJoin(addr string) error {
+	b.opt.logger.Printf("info: join %s", addr)
+	if _, err := b.list.Join([]string{addr}); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
+}
+
+func (b *Bully) Join(addr string) error {
 	if addr == b.list.LocalNode().Address() {
 		return nil // skip self join
 	}
-	oldLeader := b.getLeaderID()
-	defer func() {
-		if err != nil {
-			b.setLeaderID(oldLeader)
-		}
-	}()
+
+	if b.IsVoter() != true {
+		return b.followerJoin(addr)
+	}
+
 	// clear leader
 	b.clearLeaderID()
 	if err := b.updateNode(); err != nil {
@@ -439,47 +423,15 @@ func (b *Bully) send(targetNodeID string, data []byte) error {
 	return nil
 }
 
-func (b *Bully) readNodeEventLoop(ctx context.Context, ch chan *nodeEventMsg) {
-	defer b.wg.Done()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-
-		case msg := <-ch:
-			select {
-			case b.electionQueue <- msg:
-				// ok
-			default:
-				b.opt.onErrorFunc(errors.Wrapf(ErrBullyBusy, "maybe hangup election, drop: %s", msg))
+func (b *Bully) checkVoterNode(targetNodeID string) bool {
+	for _, n := range b.listNodes() {
+		if n.ID() == targetNodeID {
+			if n.IsVoter() {
+				return true
 			}
 		}
 	}
-}
-
-func (b *Bully) electionRunLoop(ctx context.Context) {
-	defer b.wg.Done()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-
-		case msg := <-b.electionQueue:
-			switch msg.evt {
-			case JoinEvent, LeaveEvent, TransferLeadershipEvent:
-				if err := b.startElection(ctx); err != nil {
-					b.opt.onErrorFunc(errors.Wrapf(err, "election failure"))
-					continue
-				}
-				b.opt.observeFunc(b, msg.evt, msg.id, msg.addr)
-			case ElectionEvent:
-				// emit only
-				b.opt.observeFunc(b, msg.evt, msg.id, msg.addr)
-			}
-		}
-	}
+	return false
 }
 
 func newBully(opt *bullyOpt, node Node, list *memberlist.Memberlist, cancel context.CancelFunc) *Bully {
