@@ -23,7 +23,7 @@ const (
 	DefaultUpdateNodeTimeout     = 5 * time.Second
 	DefaultJoinNodeTimeout       = DefaultElectionTimeout + (10 * time.Second)
 	DefaultLeaveNodeTimeout      = 10 * time.Second
-	DefaultTransferLeaderTimeout = 10 * time.Second
+	DefaultTransferLeaderTimeout = DefaultElectionTimeout + (10 * time.Second)
 	DefaultRetryNodeMsgTimeout   = 5 * time.Second
 	DefaultRetryNodeEventTimeout = 5 * time.Second
 )
