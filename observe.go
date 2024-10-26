@@ -69,9 +69,10 @@ var (
 )
 
 type nodeEventMsg struct {
-	evt  NodeEvent
-	id   string
-	addr string
+	evt     NodeEvent
+	id      string
+	addr    string
+	isVoter bool
 }
 
 type observeNodeEvent struct {
@@ -86,8 +87,14 @@ func (e *observeNodeEvent) NotifyJoin(node *memberlist.Node) {
 		return // drop
 	}
 
-	e.opt.logger.Printf("info: join event: name=%s addr=%s", node.Name, node.Address())
-	msg := &nodeEventMsg{JoinEvent, node.Name, node.Address()}
+	e.opt.logger.Printf("info: join event: name=%s addr=%s meta=%s", node.Name, node.Address(), node.Meta)
+	meta, err := fromJSON(bytes.NewReader(node.Meta))
+	if err != nil {
+		e.opt.logger.Printf("warn: fromJSON(%s):%+v", node.Meta, errors.WithStack(err))
+		return
+	}
+
+	msg := &nodeEventMsg{JoinEvent, node.Name, node.Address(), meta.IsVoter}
 	select {
 	case <-e.ctx.Done():
 		return
@@ -105,7 +112,13 @@ func (e *observeNodeEvent) NotifyLeave(node *memberlist.Node) {
 	}
 
 	e.opt.logger.Printf("info: leave event: name=%s addr=%s", node.Name, node.Address())
-	msg := &nodeEventMsg{LeaveEvent, node.Name, node.Address()}
+	meta, err := fromJSON(bytes.NewReader(node.Meta))
+	if err != nil {
+		e.opt.logger.Printf("warn: fromJSON(%s):%+v", node.Meta, errors.WithStack(err))
+		return
+	}
+
+	msg := &nodeEventMsg{LeaveEvent, node.Name, node.Address(), meta.IsVoter}
 	select {
 	case <-e.ctx.Done():
 		return

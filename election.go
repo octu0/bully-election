@@ -28,10 +28,8 @@ func (b *Bully) startElection(ctx context.Context, event NodeEvent, nodeID strin
 		}
 	}()
 
-	if event == JoinEvent {
-		if b.checkVoterNode(nodeID) != true {
-			return nil // skip nonvoter join
-		}
+	if event == LeaveEvent && b.node.ID() == nodeID {
+		return nil // leave self
 	}
 
 	b.opt.logger.Printf("debug: start election")

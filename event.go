@@ -59,9 +59,11 @@ func (b *Bully) electionRunLoop(ctx context.Context) {
 		case msg := <-b.electionQueue:
 			switch msg.evt {
 			case JoinEvent, LeaveEvent, TransferLeadershipEvent:
-				if err := b.startElection(ctx, msg.evt, msg.id); err != nil {
-					b.opt.onErrorFunc(errors.Wrapf(err, "election failure"))
-					continue
+				if msg.isVoter {
+					if err := b.startElection(ctx, msg.evt, msg.id); err != nil {
+						b.opt.onErrorFunc(errors.Wrapf(err, "election failure"))
+						continue
+					}
 				}
 				b.opt.observeFunc(b, msg.evt, msg.id, msg.addr)
 			case ElectionEvent:

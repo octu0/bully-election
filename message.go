@@ -143,7 +143,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 				}
 				dumpNodes()
 
-				evtMsg := &nodeEventMsg{ElectionEvent, msg.NodeID, msg.NodeAddr}
+				evtMsg := &nodeEventMsg{ElectionEvent, msg.NodeID, msg.NodeAddr, true}
 				select {
 				case evtCh <- evtMsg:
 					// ok
@@ -154,7 +154,7 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 			case TransferLeadershipMessage:
 				b.opt.logger.Printf("info: transfer_leadership message: %s", msg.NodeID)
 
-				evtMsg := &nodeEventMsg{TransferLeadershipEvent, msg.NodeID, msg.NodeAddr}
+				evtMsg := &nodeEventMsg{TransferLeadershipEvent, msg.NodeID, msg.NodeAddr, true}
 				select {
 				case evtCh <- evtMsg:
 					// ok
