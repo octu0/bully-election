@@ -148,7 +148,16 @@ func (b *Bully) readNodeMessageLoop(ctx context.Context, ch chan []byte, evtCh c
 				case evtCh <- evtMsg:
 					// ok
 				case <-time.After(b.opt.retryNodeEventTimeout):
-					b.opt.logger.Printf("warn: evtCh maybe hangup(election), drop msg: %+v", msg)
+					b.opt.logger.Printf("warn: evtCh maybe hangup(election), drop msg: %+v", evtMsg)
+				}
+
+				if b.waitElection != nil {
+					select {
+					case b.waitElection <- struct{}{}:
+						// ok
+					default:
+						b.opt.logger.Printf("warn: waitElection maybe hangup or no reader, drop")
+					}
 				}
 
 			case TransferLeadershipMessage:

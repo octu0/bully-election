@@ -12,22 +12,11 @@ var (
 	ErrTransferLeadership = errors.New("failed  to transfer_leadership")
 )
 
-func (b *Bully) startElection(ctx context.Context, event NodeEvent, nodeID string) (err error) {
+func (b *Bully) startElection(ctx context.Context, event NodeEvent, nodeID string) error {
 	if b.node.IsVoter() != true {
 		b.opt.logger.Printf("debug: is not voter, skip election")
 		return nil
 	}
-	defer func() {
-		if b.waitElection != nil {
-			select {
-			case b.waitElection <- err:
-				// ok
-			default:
-				b.opt.logger.Printf("warn: no reader: wait election, drop")
-			}
-		}
-	}()
-
 	if event == LeaveEvent && b.node.ID() == nodeID {
 		return nil // leave self
 	}

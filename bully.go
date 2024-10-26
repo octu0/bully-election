@@ -175,7 +175,7 @@ type Bully struct {
 	mu             *sync.RWMutex
 	wg             *sync.WaitGroup
 	electionQueue  chan *nodeEventMsg
-	waitElection   chan error
+	waitElection   chan struct{}
 	electionCancel context.CancelFunc
 	opt            *bullyOpt
 	cancel         context.CancelFunc
@@ -275,7 +275,7 @@ func (b *Bully) Join(addr string) error {
 		return errors.WithStack(err)
 	}
 
-	wait := make(chan error)
+	wait := make(chan struct{})
 	b.mu.Lock()
 	b.waitElection = wait
 	b.mu.Unlock()
@@ -291,10 +291,7 @@ func (b *Bully) Join(addr string) error {
 	}
 
 	select {
-	case err := <-wait:
-		if err != nil {
-			return errors.WithStack(err)
-		}
+	case <-wait:
 		return nil
 	case <-time.After(b.opt.joinNodeTimeout):
 		return errors.Wrapf(ErrJoinTimeout, "timeout = %s", b.opt.joinNodeTimeout)
@@ -302,26 +299,19 @@ func (b *Bully) Join(addr string) error {
 }
 
 func (b *Bully) Leave() error {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	if err := b.list.Leave(b.opt.leaveNodeTimeout); err != nil {
 		return errors.Wrapf(ErrLeaveTimeout, "timeout = %s: %+v", b.opt.leaveNodeTimeout, err)
 	}
+
 	return nil
 }
 
 func (b *Bully) LeadershipTransfer(ctx context.Context) error {
-	isLeader := false
-	b.mu.RLock()
-	isLeader = b.node.IsLeader()
-	b.mu.RUnlock()
-
-	if isLeader != true {
+	if b.IsLeader() != true {
 		return nil
 	}
 
-	wait := make(chan error)
+	wait := make(chan struct{})
 	b.mu.Lock()
 	b.waitElection = wait
 	b.mu.Unlock()
@@ -336,10 +326,7 @@ func (b *Bully) LeadershipTransfer(ctx context.Context) error {
 	}
 
 	select {
-	case err := <-wait:
-		if err != nil {
-			return errors.WithStack(err)
-		}
+	case <-wait:
 		return nil
 	case <-time.After(b.opt.transferLeaderTimeout):
 		return errors.Wrapf(ErrTransferLeadershipTimeout, "timeout = %s", b.opt.transferLeaderTimeout)
@@ -450,6 +437,7 @@ func newBully(opt *bullyOpt, node Node, list *memberlist.Memberlist, cancel cont
 type createNodeFunc func(ulid string) Node
 
 func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyOptFunc, createNode createNodeFunc) (*Bully, error) {
+	originalNodeName := conf.Name
 	ctx, cancel := context.WithCancel(parent)
 	opt := newBullyOpt(funcs)
 	if opt.logger == nil {
@@ -459,6 +447,9 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 	ulid := opt.ulidGeneratorFunc()
 	if opt.enableUniqNodeName {
 		conf.Name = fmt.Sprintf("%s-%s", conf.Name, ulid)
+	}
+	if conf.Logger == nil {
+		conf.Logger = opt.logger
 	}
 
 	ready := newAtomicReadyStatus()
@@ -481,7 +472,7 @@ func createBully(parent context.Context, conf *memberlist.Config, funcs []BullyO
 	}
 	if resolvLater {
 		node.setPort(int(list.LocalNode().Port))
-		opt.logger.SetPrefix(fmt.Sprintf("%s(%s:%d) ", node.ID(), node.Addr(), node.Port()))
+		opt.logger.SetPrefix(fmt.Sprintf("%s(%s:%d) ", originalNodeName, node.Addr(), node.Port()))
 	}
 
 	b := newBully(opt, node, list, cancel)

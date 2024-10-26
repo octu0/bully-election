@@ -94,6 +94,12 @@ func TestCreateVoter(t *testing.T) {
 		b2, err := CreateVoter(ctx, conf2,
 			WithElectionTimeout(1*time.Second),
 			WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					// pass
+				}
 				tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 			}),
 			WithOnErrorFunc(func(err error) {
@@ -454,7 +460,7 @@ func TestMetadata(t *testing.T) {
 	b1, err := CreateVoter(ctx, conf1,
 		WithElectionTimeout(1*time.Second),
 		WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
-			tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
+			t.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 		}),
 		WithOnErrorFunc(func(err error) {
 			t.Fatalf("[1] on error=%+v", err)
@@ -468,7 +474,7 @@ func TestMetadata(t *testing.T) {
 	b2, err := CreateVoter(ctx, conf2,
 		WithElectionTimeout(1*time.Second),
 		WithObserveFunc(func(b *Bully, evt NodeEvent, id, addr string) {
-			tt.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
+			t.Logf("[%s] event: %s node=%s(%s)", b.ID(), evt.String(), id, addr)
 		}),
 		WithOnErrorFunc(func(err error) {
 			t.Fatalf("[2] on error=%+v", err)
@@ -487,9 +493,6 @@ func TestMetadata(t *testing.T) {
 		t.Errorf("UpdateMetadata")
 	}
 
-	//t.Logf("TODO detect update")
-	time.Sleep(100 * time.Millisecond)
-
 	for _, m := range b2.Members() {
 		if m.ID() == "test1" {
 			data := m.UserMetadata()
@@ -502,9 +505,6 @@ func TestMetadata(t *testing.T) {
 	if err := b1.UpdateMetadata([]byte("world")); err != nil {
 		t.Errorf("UpdateMetadata")
 	}
-
-	//t.Logf("TODO detect update")
-	time.Sleep(100 * time.Millisecond)
 
 	for _, m := range b2.Members() {
 		if m.ID() == "test1" {

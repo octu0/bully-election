@@ -42,7 +42,7 @@ func (b *Bully) readNodeEventLoop(ctx context.Context, ch chan *nodeEventMsg) {
 			case b.electionQueue <- msg:
 				// ok
 			default:
-				b.opt.onErrorFunc(errors.Wrapf(ErrBullyBusy, "maybe hangup election, drop: %s", msg))
+				b.opt.onErrorFunc(errors.Wrapf(ErrBullyBusy, "maybe hangup election, drop: %v", msg))
 			}
 		}
 	}
