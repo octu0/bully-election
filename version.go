@@ -2,5 +2,5 @@ package bullyelection
 
 const (
 	AppName string = "bully-election"
-	Version string = "1.6.0"
+	Version string = "1.6.1"
 )
