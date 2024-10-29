@@ -215,6 +215,13 @@ func (b *Bully) IsLeader() bool {
 	return b.node.IsLeader()
 }
 
+func (b *Bully) Metadata() []byte {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	return b.node.UserMetadata()
+}
+
 func (b *Bully) UpdateMetadata(data []byte) error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
